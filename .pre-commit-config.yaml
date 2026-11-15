@@ -1,0 +1,49 @@
+# Local pre-commit hooks for session-vault-plugin.
+#
+# Install once per clone:  pre-commit install
+# Run manually on everything:  pre-commit run --all-files
+#
+# The Go code lives in cli/, so the Go hooks are local `language: system`
+# hooks that run the system golangci-lint (keep it at v2.15.0 to match CI)
+# from inside cli/ so it picks up cli/.golangci.yaml.
+repos:
+  # Go linting + formatting (system golangci-lint, run from cli/).
+  - repo: local
+    hooks:
+      - id: golangci-lint
+        name: golangci-lint (cli)
+        entry: bash -c 'cd cli && golangci-lint run --new-from-rev HEAD --fix'
+        language: system
+        types: [go]
+        pass_filenames: false
+        require_serial: true
+      - id: golangci-lint-fmt
+        name: golangci-lint-fmt (cli)
+        entry: bash -c 'cd cli && golangci-lint fmt'
+        language: system
+        types: [go]
+        pass_filenames: false
+        require_serial: true
+
+  # Shell script linting (session-vault.sh).
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.11.0.1-1
+    hooks:
+      - id: shellcheck
+
+  # GitHub Actions workflow linting (same tool as the ci actionlint job).
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.12
+    hooks:
+      - id: actionlint
+
+  # Generic file hygiene.
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-yaml
+      - id: check-json
+      - id: check-merge-conflict
+      - id: detect-private-key
+      - id: end-of-file-fixer
+      - id: trailing-whitespace

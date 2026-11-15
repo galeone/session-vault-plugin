@@ -24,10 +24,10 @@ package main
 
 import (
 	"compress/gzip"
-	"log/slog"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"

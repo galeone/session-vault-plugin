@@ -1,8 +1,8 @@
 package main
 
 import (
-	"compress/gzip"
 	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"io"
