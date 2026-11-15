@@ -1,0 +1,72 @@
+# Builds the session-vault client for every supported platform, attaches the
+# binaries to the release created by release-please, and keeps the in-repo
+# version strings (marketplace.json, plugin.json, session-vault.sh) in sync
+# with the released tag.
+name: release-artifacts
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: cli/go.mod
+      - name: Build all platforms
+        run: bash cli/build-release.sh "${GITHUB_REF_NAME#v}"
+      - name: Show artifacts
+        run: ls -l cli/dist
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: cli/dist/
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist/
+      - uses: softprops/action-gh-release@v3
+        with:
+          files: dist/*
+          generate_release_notes: false
+
+  # release-please (release-type: simple) bumps version.txt + CHANGELOG but
+  # does not know about our JSON manifests or the bootstrap script, so this
+  # job keeps those in lockstep with the tag. It pushes straight to main.
+  sync-version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Sync version strings to ${{ github.ref_name }}
+        run: |
+          new="${GITHUB_REF_NAME#v}"
+          market=".claude-plugin/marketplace.json"
+          plugin="plugins/session-vault/.claude-plugin/plugin.json"
+          script="plugins/session-vault/scripts/session-vault.sh"
+          sed -i "s/^VERSION=.*$/VERSION=\"$new\"/" "$script"
+          sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$new\"/" "$market"
+          sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$new\"/" "$plugin"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "$script" "$market" "$plugin"
+          if git diff --cached --quiet; then
+            echo "version strings already at $new"
+          else
+            git commit -m "chore(release): sync version strings to $new [skip ci]"
+            git push origin HEAD:main
+          fi

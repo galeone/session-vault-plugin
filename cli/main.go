@@ -211,7 +211,7 @@ func (c config) identities() ([]age.Identity, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	ids, err := age.ParseIdentities(f)
 	if err != nil {
 		return nil, fmt.Errorf("parsing %s: %w", c.AgeKey, err)
@@ -276,12 +276,18 @@ func keygen() error {
 // on stdin. State is keyed by cwd slug so concurrent sessions in different
 // projects don't clobber each other. Best-effort: never fails the hook.
 func track() error {
+	return trackFrom(os.Stdin)
+}
+
+// trackFrom is the testable core of track: it reads the hook payload from r
+// and records it under the cwd slug.
+func trackFrom(r io.Reader) error {
 	var payload struct {
 		SessionID      string `json:"session_id"`
 		TranscriptPath string `json:"transcript_path"`
 		Cwd            string `json:"cwd"`
 	}
-	if err := json.NewDecoder(os.Stdin).Decode(&payload); err != nil || payload.Cwd == "" {
+	if err := json.NewDecoder(r).Decode(&payload); err != nil || payload.Cwd == "" {
 		return nil
 	}
 	dir := filepath.Join(stateDir(), "by-cwd")
@@ -406,7 +412,7 @@ func encodeTranscript(path string, recipients []age.Recipient) (io.Reader, error
 	}
 	pr, pw := io.Pipe()
 	go func() {
-		defer f.Close()
+		defer func() { _ = f.Close() }()
 		var dst io.Writer = pw
 		var enc io.WriteCloser
 		if recipients != nil {
@@ -433,7 +439,7 @@ func encodeTranscript(path string, recipients []age.Recipient) (io.Reader, error
 				return
 			}
 		}
-		pw.Close()
+		_ = pw.Close()
 	}()
 	return pr, nil
 }
@@ -448,7 +454,9 @@ func list() error {
 		return err
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "NAME\tSESSION ID\tORIGINAL CWD\tUPLOADED AT\tBYTES\tENCRYPTED")
+	if _, err := fmt.Fprintln(w, "NAME\tSESSION ID\tORIGINAL CWD\tUPLOADED AT\tBYTES\tENCRYPTED"); err != nil {
+		return err
+	}
 	for _, m := range metas {
 		enc := m.Encrypted
 		if enc == "" {
@@ -462,8 +470,10 @@ func list() error {
 		if cwd == "" {
 			cwd = m.Project
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d\t%s\n",
-			name, m.SessionID, cwd, m.UploadedAt.Format(time.RFC3339), m.Size, enc)
+		if _, err := fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d\t%s\n",
+			name, m.SessionID, cwd, m.UploadedAt.Format(time.RFC3339), m.Size, enc); err != nil {
+			return err
+		}
 	}
 	return w.Flush()
 }
@@ -578,7 +588,7 @@ func download(cfg config, meta Meta, destProject string) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return httpError(resp)
 	}
@@ -614,9 +624,9 @@ func download(cfg config, meta Meta, destProject string) error {
 	if err != nil {
 		return err
 	}
-	defer os.Remove(tmp.Name())
+	defer func() { _ = os.Remove(tmp.Name()) }()
 	if _, err := io.Copy(tmp, src); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return err
 	}
 	if err := tmp.Close(); err != nil {
@@ -636,7 +646,7 @@ func doJSON(req *http.Request, out any) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return httpError(resp)
 	}
