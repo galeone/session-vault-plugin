@@ -9,7 +9,7 @@
       "name": "session-vault",
       "source": "./plugins/session-vault",
       "description": "Save Claude Code sessions to your own server (/save) and fetch them back (/fetch)",
-      "version": "0.2.0",
+      "version": "1.0.0",
       "author": {
         "name": "Paolo Galeone"
       }
