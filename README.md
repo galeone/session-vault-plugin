@@ -38,6 +38,13 @@ SESSION_VAULT_TOKEN=your-token
 All values can also be provided as environment variables, which take
 precedence over the file.
 
+The CLI logs structured text (slog) to stderr and to a daily file named
+`YYYY-MM-DD.log` under `$SESSION_VAULT_LOG_DIR`, or
+`$XDG_STATE_HOME/session-vault/logs`, or `~/.local/state/session-vault/logs`
+(logs older than 21 days are deleted). `SESSION_VAULT_LOG_LEVEL=debug|info|
+warn|error` (default `info`) sets the level; command output on stdout is
+never affected.
+
 ### End-to-end encryption (recommended)
 
 Generate an age identity once (any of these works — the plugin's binary has
@@ -128,3 +135,24 @@ plugins/session-vault/
 └── scripts/session-vault.sh         Binary bootstrap wrapper
 cli/                                 Go source of the session-vault client
 ```
+
+## CI & releases
+
+- **CI** (`.github/workflows/ci.yml`) runs on every push to `main` and every PR:
+  `go test` + `golangci-lint` on `cli/`, `bash -n` + `shellcheck` on the
+  bootstrap script, and `jq` validation of the plugin JSON manifests.
+- **Releases** are cut by [release-please](.github/workflows/release-please.yml)
+  on push to `main`, following [Conventional Commits](https://www.conventionalcommits.org):
+  - `fix: ...` → **patch** (0.2.0 → 0.2.1)
+  - `feat: ...` → **minor** (0.2.0 → 0.3.0)
+  - `feat!:` / `BREAKING CHANGE:` footer → **major** (0.2.0 → 1.0.0)
+  - other types (`chore`, `docs`, `ci`, ...) only land in the next changelog
+- When a release is cut, release-please creates the `vX.Y.Z` tag, `CHANGELOG.md`
+  and an empty GitHub release. That tag triggers
+  [release-artifacts](.github/workflows/release-artifacts.yml), which:
+  1. cross-compiles the static client for linux/darwin/windows × amd64/arm64
+     via `cli/build-release.sh` (version injected via `-ldflags -X main.version`),
+  2. attaches the binaries + `checksums.txt` to the release (this is what the
+     bootstrap script in `session-vault.sh` downloads and verifies), and
+  3. keeps the in-repo version strings in `marketplace.json`, `plugin.json` and
+     `scripts/session-vault.sh` in sync with the tag (pushed back to `main`).

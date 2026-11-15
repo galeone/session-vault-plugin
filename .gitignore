@@ -1,3 +1,4 @@
 cli/dist/
 cli/session-vault
 cli/session-vault.exe
+/cli
