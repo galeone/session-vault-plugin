@@ -1,0 +1,130 @@
+# session-vault (Claude Code plugin)
+
+Save your Claude Code sessions to your own server with `/save`, and get them
+back on any machine with `/fetch`. End-to-end encrypted with
+[age](https://age-encryption.org): the server only ever stores ciphertext.
+
+This repository is a Claude Code **plugin marketplace** containing a single
+plugin, `session-vault`, plus the Go source of its client CLI (`cli/`). The
+companion server lives in the [`session-vault-server`](../session-vault-server)
+repository.
+
+Works on Linux, macOS, and native Windows (Git Bash): the plugin is a thin
+wrapper around a single static Go binary, downloaded automatically on first
+use — no runtime dependencies to install.
+
+## Install
+
+Inside Claude Code:
+
+```
+/plugin marketplace add galeone/session-vault-plugin
+/plugin install session-vault@galeone-plugins
+```
+
+(For local development: `/plugin marketplace add /path/to/session-vault-plugin`.)
+
+## Configure
+
+Create `~/.config/session-vault/config`:
+
+```sh
+SESSION_VAULT_URL=https://sessions.example.com
+SESSION_VAULT_TOKEN=your-token
+# Optional, defaults to ~/.config/session-vault/age.key:
+# SESSION_VAULT_AGE_KEY=/path/to/age.key
+```
+
+All values can also be provided as environment variables, which take
+precedence over the file.
+
+### End-to-end encryption (recommended)
+
+Generate an age identity once (any of these works — the plugin's binary has
+age built in, no separate install needed):
+
+```
+session-vault keygen
+```
+
+or ask Claude to run `/save` once and follow the warning it prints. When the
+key file exists, `/save` uploads `age(gzip(transcript))` and the server only
+stores ciphertext it cannot read; `/fetch` decrypts locally with the same key.
+Copy `age.key` to every machine that needs to fetch your sessions — **if you
+lose the key, encrypted sessions are unrecoverable**. The key file is
+compatible with the standalone `age` CLI. Without a key, `/save` still works
+but uploads plaintext and prints a warning.
+
+## Usage
+
+| Command | What it does |
+|---|---|
+| `/save` | Uploads the current session's transcript to the server |
+| `/save <name>` | Same, labeled with a memorable name for later restore |
+| `/fetch` | Lists saved sessions (name, id, original cwd) to choose from |
+| `/fetch <name-or-id>` | Restores that session **into the current project**, ready to resume here |
+| `/fetch all` | Mirrors every missing session back to its original project directory |
+
+The core workflow this enables: work on Linux in `/data/you/repo`, `/save
+my-feature`, then on any other machine — different OS, different clone path —
+open the repo and run `/fetch my-feature`. The transcript is remapped into
+the current directory's project, and `claude --resume <id>` continues the
+session there. (The session's *history* still references paths from the
+original machine; the CLI prints a note reminding you of where it was
+recorded.)
+
+Restores never overwrite an existing local transcript. Re-saving a labeled
+session without repeating the name keeps its label.
+
+## How it works
+
+- Claude Code stores transcripts locally at
+  `~/.claude/projects/<cwd-slug>/<session-id>.jsonl`, where `<cwd-slug>` is
+  the absolute working directory with every non-alphanumeric character
+  replaced by `-` (`CLAUDE_CONFIG_DIR` is honored).
+- Slash commands cannot see the current session id directly, so the plugin
+  ships a `SessionStart` hook that runs `session-vault track`, recording
+  `{session_id, transcript_path, cwd}` to
+  `~/.local/state/session-vault/by-cwd/<cwd-slug>.json`.
+- `/save` reads that state (falling back to the most recently modified
+  transcript for the project) and uploads gzip-compressed, age-encrypted when
+  a key is configured.
+- Transcripts are treated as opaque blobs: their JSONL format is internal to
+  Claude Code and changes between versions, so nothing here parses them.
+
+### The client binary
+
+[`scripts/session-vault.sh`](plugins/session-vault/scripts/session-vault.sh)
+resolves the CLI in this order:
+
+1. `$SESSION_VAULT_BIN` (explicit override)
+2. `session-vault` on `PATH`
+3. a cached prebuilt binary in `~/.local/share/session-vault/bin/`,
+   downloaded from this repo's GitHub releases on first use
+
+The wrapper itself needs only `bash` and `curl`, which Claude Code already
+requires on every platform (Git Bash provides both on Windows).
+
+Build from source instead: `cd cli && go build -o session-vault .` and put
+the binary on `PATH`. Cut release artifacts for all platforms with
+`cli/build-release.sh <version>`.
+
+## Security notes
+
+- Transcripts can contain source code, secrets pasted into the chat, and
+  command output. Enable end-to-end encryption (above) so the server only
+  stores ciphertext, and always use HTTPS.
+- The token is sent as a `Bearer` header; keep the config file and age key
+  private (`chmod 600`).
+
+## Repository layout
+
+```
+.claude-plugin/marketplace.json      Marketplace catalog (name: galeone-plugins)
+plugins/session-vault/
+├── .claude-plugin/plugin.json       Plugin manifest
+├── commands/save.md, fetch.md       /save and /fetch
+├── hooks/hooks.json                 SessionStart hook (session-vault track)
+└── scripts/session-vault.sh         Binary bootstrap wrapper
+cli/                                 Go source of the session-vault client
+```

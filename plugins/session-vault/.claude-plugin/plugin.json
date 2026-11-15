@@ -1,0 +1,11 @@
+{
+  "name": "session-vault",
+  "version": "0.2.0",
+  "description": "Save Claude Code session transcripts to your own session-vault server and fetch them back on any machine",
+  "author": {
+    "name": "Paolo Galeone",
+    "email": "nessuno@nerdz.eu"
+  },
+  "license": "MIT",
+  "keywords": ["session", "transcript", "backup", "sync"]
+}
