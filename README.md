@@ -38,6 +38,13 @@ SESSION_VAULT_TOKEN=your-token
 All values can also be provided as environment variables, which take
 precedence over the file.
 
+The CLI logs structured text (slog) to stderr and to a daily file named
+`YYYY-MM-DD.log` under `$SESSION_VAULT_LOG_DIR`, or
+`$XDG_STATE_HOME/session-vault/logs`, or `~/.local/state/session-vault/logs`
+(logs older than 21 days are deleted). `SESSION_VAULT_LOG_LEVEL=debug|info|
+warn|error` (default `info`) sets the level; command output on stdout is
+never affected.
+
 ### End-to-end encryption (recommended)
 
 Generate an age identity once (any of these works — the plugin's binary has

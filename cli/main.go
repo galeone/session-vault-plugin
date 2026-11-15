@@ -24,6 +24,7 @@ package main
 
 import (
 	"compress/gzip"
+	"log/slog"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -53,6 +54,7 @@ type Meta struct {
 }
 
 func main() {
+	initLogger()
 	if len(os.Args) < 2 {
 		usage()
 	}
@@ -298,7 +300,9 @@ func trackFrom(r io.Reader) error {
 	if err != nil {
 		return nil
 	}
-	_ = os.WriteFile(filepath.Join(dir, projectSlug(payload.Cwd)+".json"), data, 0o600)
+	state := filepath.Join(dir, projectSlug(payload.Cwd)+".json")
+	_ = os.WriteFile(state, data, 0o600)
+	slog.Debug("track", "session", payload.SessionID, "cwd", payload.Cwd, "state", state)
 	return nil
 }
 
@@ -399,6 +403,7 @@ func save(name string) error {
 		label = fmt.Sprintf(" as %q", meta.Name)
 	}
 	fmt.Printf("saved session %s%s (%s, %d bytes stored) from %s\n", meta.SessionID, label, enc, meta.Size, transcript)
+	slog.Debug("save", "session_id", meta.SessionID, "name", meta.Name, "size", meta.Size, "encrypted", meta.Encrypted, "transcript", transcript)
 	return nil
 }
 
@@ -486,6 +491,9 @@ func listSessions(cfg config) ([]Meta, error) {
 	req.Header.Set("Authorization", "Bearer "+cfg.Token)
 	var metas []Meta
 	err = doJSON(req, &metas)
+	if err == nil {
+		slog.Debug("list", "count", len(metas))
+	}
 	return metas, err
 }
 
@@ -502,6 +510,7 @@ func get(key string) error {
 	if err != nil {
 		return err
 	}
+	slog.Debug("resolve", "key", key, "session_id", meta.SessionID, "project", meta.Project, "cwd", meta.Cwd)
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err
@@ -573,6 +582,7 @@ func download(cfg config, meta Meta, destProject string) error {
 	dest := filepath.Join(destDir, id+".jsonl")
 	if _, err := os.Stat(dest); err == nil {
 		fmt.Printf("skip    %s (already present at %s)\n", id, dest)
+		slog.Debug("download", "session_id", id, "skip", true, "dest", dest)
 		return nil
 	}
 	if err := os.MkdirAll(destDir, 0o755); err != nil {
@@ -636,6 +646,7 @@ func download(cfg config, meta Meta, destProject string) error {
 		return err
 	}
 	fmt.Printf("fetched %s -> %s\n", id, dest)
+	slog.Debug("download", "session_id", id, "dest", dest, "encrypted", meta.Encrypted)
 	return nil
 }
 
