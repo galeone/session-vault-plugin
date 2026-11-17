@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.0](https://github.com/galeone/session-vault-plugin/compare/v1.2.0...v1.3.0) (2026-11-17)
+
+
+### Features
+
+* add /session-vault:list and /session-vault:clean commands ([e3aad6c](https://github.com/galeone/session-vault-plugin/commit/e3aad6c2c9ccae1da08a252e08ce0f5c8f03d658))
+* add /session-vault:list and /session-vault:clean commands ([a71bd76](https://github.com/galeone/session-vault-plugin/commit/a71bd7617679277cda10f735e67e7d21f30054e7))
+
 ## [1.2.0](https://github.com/galeone/session-vault-plugin/compare/v1.1.1...v1.2.0) (2026-11-17)
 
 
