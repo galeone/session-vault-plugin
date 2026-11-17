@@ -10,7 +10,7 @@
 //
 //	session-vault keygen            generate the age identity (once per user)
 //	session-vault track             SessionStart hook: record session info from stdin JSON
-//	session-vault save              upload the current project's session
+//	session-vault save [name]       upload the current project's session (auto-named from the session title)
 //	session-vault list              list sessions stored on the server
 //	session-vault get <session-id>  download one session into ~/.claude/projects/
 //	session-vault all               download every session missing locally
@@ -23,6 +23,7 @@
 package main
 
 import (
+	"bufio"
 	"compress/gzip"
 	"encoding/json"
 	"fmt"
@@ -369,6 +370,12 @@ func save(name string) error {
 	if err != nil {
 		return err
 	}
+	if name == "" {
+		if title := sessionTitle(transcript); title != "" {
+			name = slugify(title)
+			fmt.Fprintf(os.Stderr, "no name given; using the session title %q\n", title)
+		}
+	}
 
 	recipients, err := cfg.recipients()
 	if err != nil {
@@ -546,6 +553,55 @@ func get(key string) error {
 }
 
 // resolve matches key against session ids first, then against user-chosen
+// sessionTitle returns the AI-generated title Claude Code writes into the
+// transcript ("type":"ai-title" lines, repeated as the title is
+// regenerated); the last occurrence wins. Empty when the transcript has
+// none.
+func sessionTitle(transcript string) string {
+	f, err := os.Open(transcript)
+	if err != nil {
+		return ""
+	}
+	defer func() { _ = f.Close() }()
+	var title string
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	for sc.Scan() {
+		var line struct {
+			Type    string `json:"type"`
+			AITitle string `json:"aiTitle"`
+		}
+		if json.Unmarshal(sc.Bytes(), &line) != nil {
+			continue
+		}
+		if line.Type == "ai-title" && line.AITitle != "" {
+			title = line.AITitle
+		}
+	}
+	return title
+}
+
+// slugify turns a free-form title into a valid session name: lowercase,
+// runs of non-alphanumerics collapse to a single '-', max 64 chars.
+func slugify(s string) string {
+	var b strings.Builder
+	dash := false
+	for _, r := range strings.ToLower(s) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' {
+			b.WriteRune(r)
+			dash = false
+		} else if !dash {
+			b.WriteRune('-')
+			dash = true
+		}
+	}
+	out := strings.Trim(b.String(), "-")
+	if r := []rune(out); len(r) > 64 {
+		out = strings.Trim(string(r[:64]), "-")
+	}
+	return out
+}
+
 // names. An ambiguous name (reused across saves) is an error listing the ids.
 func resolve(cfg config, key string) (Meta, error) {
 	metas, err := listSessions(cfg)

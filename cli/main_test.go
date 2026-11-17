@@ -392,6 +392,54 @@ func TestDownloadSkipPresent(t *testing.T) {
 	}
 }
 
+func TestSessionTitle(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sess.jsonl")
+	content := "{}\n" +
+		`{"type":"user","message":{"content":"hi"}}` + "\n" +
+		`{"type":"ai-title","aiTitle":"first title","sessionId":"x"}` + "\n" +
+		`{"type":"ai-title","aiTitle":"Second, Better Title!","sessionId":"x"}` + "\n" +
+		`{"type":"cost-state","sessionId":"x"}` + "\n"
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if got := sessionTitle(path); got != "Second, Better Title!" {
+		t.Fatalf("sessionTitle = %q, want the last ai-title", got)
+	}
+
+	noTitle := filepath.Join(dir, "notitle.jsonl")
+	if err := os.WriteFile(noTitle, []byte(`{"type":"user"}`+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if got := sessionTitle(noTitle); got != "" {
+		t.Fatalf("sessionTitle = %q, want empty", got)
+	}
+	if got := sessionTitle(filepath.Join(dir, "missing.jsonl")); got != "" {
+		t.Fatalf("sessionTitle on missing file = %q, want empty", got)
+	}
+}
+
+func TestSlugify(t *testing.T) {
+	cases := map[string]string{
+		"Second, Better Title!":           "second-better-title",
+		"  Apple  access  ":               "apple-access",
+		"keep_underscores-yes":            "keep_underscores-yes",
+		"café au lait":                    "caf-au-lait",
+		"":                                "",
+		"-leading-dash-":                  "leading-dash",
+		"only" + strings.Repeat("-x", 40): "only" + strings.Repeat("-x", 30), // trimmed to 64
+	}
+	for in, want := range cases {
+		got := slugify(in)
+		if got != want {
+			t.Errorf("slugify(%q) = %q, want %q", in, got, want)
+		}
+		if got != "" && !validSessionName.MatchString(got) {
+			t.Errorf("slugify(%q) = %q is not a valid session name", in, got)
+		}
+	}
+}
+
 func TestGenerateKey(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "age.key")
