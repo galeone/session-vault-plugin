@@ -4,6 +4,7 @@
     "name": "Paolo Galeone",
     "email": "nessuno@nerdz.eu"
   },
+  "description": "Claude Code plugins by Paolo Galeone: session-vault saves and restores your Claude Code sessions on your own server, end-to-end encrypted",
   "plugins": [
     {
       "name": "session-vault",
