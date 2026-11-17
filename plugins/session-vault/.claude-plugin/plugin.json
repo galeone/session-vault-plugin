@@ -1,6 +1,6 @@
 {
   "name": "session-vault",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Save Claude Code session transcripts to your own session-vault server and fetch them back on any machine",
   "author": {
     "name": "Paolo Galeone",
