@@ -416,7 +416,9 @@ func TestGenerateKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	ids, err := age.ParseIdentities(f)
-	f.Close()
+	if err := f.Close(); err != nil {
+		t.Fatalf("closing key file: %v", err)
+	}
 	if err != nil {
 		t.Fatalf("key file does not parse: %v", err)
 	}
