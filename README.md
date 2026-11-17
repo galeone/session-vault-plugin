@@ -64,9 +64,11 @@ standalone `age` CLI.
 |---|---|
 | `/session-vault:save` | Uploads the current session's transcript to the server |
 | `/session-vault:save <name>` | Same, labeled with a memorable name for later restore |
-| `/session-vault:fetch` | Lists saved sessions (name, id, original cwd) to choose from |
+| `/session-vault:list` | Lists saved sessions (name, id, original cwd) |
+| `/session-vault:fetch` | Lists saved sessions to choose from, or restore one (`<name-or-id>`) / mirror all (`all`) |
 | `/session-vault:fetch <name-or-id>` | Restores that session **into the current project**, ready to resume here |
 | `/session-vault:fetch all` | Mirrors every missing session back to its original project directory |
+| `/session-vault:clean <name-or-id>` | Deletes a session from the server (asks for confirmation first; local files are untouched) |
 
 The core workflow this enables: work on Linux in `/data/you/repo`,
 `/session-vault:save my-feature`, then on any other machine — different OS,
@@ -131,7 +133,7 @@ the binary on `PATH`. Cut release artifacts for all platforms with
 .claude-plugin/marketplace.json      Marketplace catalog (name: galeone-plugins)
 plugins/session-vault/
 ├── .claude-plugin/plugin.json       Plugin manifest
-├── commands/save.md, fetch.md       /save and /fetch
+├── commands/save.md, fetch.md, list.md, clean.md
 ├── hooks/hooks.json                 SessionStart hook (session-vault track)
 └── scripts/session-vault.sh         Binary bootstrap wrapper
 cli/                                 Go source of the session-vault client

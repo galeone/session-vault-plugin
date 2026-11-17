@@ -273,10 +273,14 @@ func TestEncodeTranscriptAge(t *testing.T) {
 func fakeVault(t *testing.T) *httptest.Server {
 	t.Helper()
 	store := map[string][]byte{}
+	names := map[string]string{}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/v1/sessions", func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		store[r.Header.Get("X-Session-Id")] = body
+		if n := r.Header.Get("X-Name"); n != "" {
+			names[r.Header.Get("X-Session-Id")] = n
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(Meta{
 			SessionID:  r.Header.Get("X-Session-Id"),
@@ -291,7 +295,7 @@ func fakeVault(t *testing.T) *httptest.Server {
 		w.Header().Set("Content-Type", "application/json")
 		var out []Meta
 		for id, b := range store {
-			out = append(out, Meta{SessionID: id, Project: "proj", Size: int64(len(b)), UploadedAt: time.Now().UTC()})
+			out = append(out, Meta{SessionID: id, Name: names[id], Project: "proj", Size: int64(len(b)), UploadedAt: time.Now().UTC()})
 		}
 		if out == nil {
 			out = []Meta{}
@@ -306,6 +310,16 @@ func fakeVault(t *testing.T) *httptest.Server {
 			return
 		}
 		_, _ = w.Write(b)
+	})
+	mux.HandleFunc("DELETE /api/v1/sessions/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		if _, ok := store[id]; !ok {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		delete(store, id)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]int{"deleted": 1})
 	})
 	return httptest.NewServer(mux)
 }
@@ -389,6 +403,67 @@ func TestDownloadSkipPresent(t *testing.T) {
 	got, _ := os.ReadFile(dest)
 	if string(got) != "existing" {
 		t.Fatalf("should have skipped, got %q", got)
+	}
+}
+
+func TestClean(t *testing.T) {
+	ts := fakeVault(t)
+	defer ts.Close()
+	t.Setenv("SESSION_VAULT_URL", ts.URL)
+	t.Setenv("SESSION_VAULT_TOKEN", "tok")
+	cfg := config{URL: ts.URL, Token: "tok"}
+	seed, _ := http.NewRequest("POST", ts.URL+"/api/v1/sessions", nil)
+	seed.Header.Set("X-Session-Id", "abc")
+	seed.Header.Set("X-Project", "proj")
+	seed.Header.Set("X-Name", "my-name")
+	resp, err := http.DefaultClient.Do(seed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+
+	if err := clean("my-name"); err != nil {
+		t.Fatal(err)
+	}
+	// gone now: resolve must fail
+	if _, err := resolve(cfg, "abc"); err == nil {
+		t.Fatal("expected resolve to fail after clean")
+	}
+	// unknown key is an error, not a panic
+	if err := clean("nope"); err == nil {
+		t.Fatal("expected error cleaning an unknown key")
+	}
+}
+
+func TestCleanAll(t *testing.T) {
+	ts := fakeVault(t)
+	defer ts.Close()
+	t.Setenv("SESSION_VAULT_URL", ts.URL)
+	t.Setenv("SESSION_VAULT_TOKEN", "tok")
+	cfg := config{URL: ts.URL, Token: "tok"}
+	for _, id := range []string{"a", "b"} {
+		seed, _ := http.NewRequest("POST", ts.URL+"/api/v1/sessions", nil)
+		seed.Header.Set("X-Session-Id", id)
+		seed.Header.Set("X-Project", "proj")
+		resp, err := http.DefaultClient.Do(seed)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+	}
+
+	if err := cleanAll(false); err == nil {
+		t.Fatal("expected cleanAll without --yes to be refused")
+	}
+	if err := cleanAll(true); err != nil {
+		t.Fatal(err)
+	}
+	if metas, _ := listSessions(cfg); len(metas) != 0 {
+		t.Fatalf("expected empty list, got %d", len(metas))
+	}
+	// idempotent on an empty vault
+	if err := cleanAll(true); err != nil {
+		t.Fatal(err)
 	}
 }
 
