@@ -14,6 +14,8 @@
 //	session-vault list              list sessions stored on the server
 //	session-vault get <session-id>  download one session into ~/.claude/projects/
 //	session-vault all               download every session missing locally
+//	session-vault clean <id-or-name> delete one session from the server
+//	session-vault clean-all --yes   delete every session from the server
 //	session-vault version           print the version
 //
 // Configuration comes from ~/.config/session-vault/config (KEY=VALUE lines)
@@ -80,6 +82,13 @@ func main() {
 		err = get(os.Args[2])
 	case "all":
 		err = fetchAll()
+	case "clean":
+		if len(os.Args) != 3 {
+			usage()
+		}
+		err = clean(os.Args[2])
+	case "clean-all":
+		err = cleanAll(len(os.Args) > 2 && os.Args[2] == "--yes")
 	case "version":
 		fmt.Println("session-vault", version)
 	default:
@@ -101,6 +110,8 @@ func usage() {
   get <id-or-name>  restore one session into the CURRENT project directory,
                     so it is resumable from here with claude --resume
   all               mirror every missing session to its original project dir
+  clean <id-or-name> delete one session from the server (local files untouched)
+  clean-all --yes   delete every session from the server (refused without --yes)
   version           print the version`)
 	os.Exit(2)
 }
@@ -646,6 +657,77 @@ func fetchAll() error {
 		if err := download(cfg, m, m.Project); err != nil {
 			return fmt.Errorf("session %s: %w", m.SessionID, err)
 		}
+	}
+	return nil
+}
+
+func deleteOne(cfg config, m Meta) error {
+	req, err := http.NewRequest(http.MethodDelete, cfg.URL+"/api/v1/sessions/"+m.SessionID, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+cfg.Token)
+	var out struct {
+		Deleted int `json:"deleted"`
+	}
+	if err := doJSON(req, &out); err != nil {
+		return err
+	}
+	return nil
+}
+
+// clean deletes one session (by id or name) from the server. Local
+// transcripts are never touched.
+func clean(key string) error {
+	cfg, err := loadConfig()
+	if err != nil {
+		return err
+	}
+	m, err := resolve(cfg, key)
+	if err != nil {
+		return err
+	}
+	if err := deleteOne(cfg, m); err != nil {
+		return err
+	}
+	if m.Name != "" {
+		fmt.Printf("deleted session %s (%s)\n", m.SessionID, m.Name)
+	} else {
+		fmt.Printf("deleted session %s\n", m.SessionID)
+	}
+	return nil
+}
+
+// cleanAll deletes every session the token can see. It is deliberately
+// unusable without an explicit --yes, because it is permanent and
+// irreversible.
+func cleanAll(yes bool) error {
+	if !yes {
+		return fmt.Errorf("refusing to delete every session without --yes")
+	}
+	cfg, err := loadConfig()
+	if err != nil {
+		return err
+	}
+	metas, err := listSessions(cfg)
+	if err != nil {
+		return err
+	}
+	if len(metas) == 0 {
+		fmt.Println("no sessions on the server")
+		return nil
+	}
+	deleted, failed := 0, []string{}
+	for _, m := range metas {
+		if err := deleteOne(cfg, m); err != nil {
+			failed = append(failed, m.SessionID)
+			continue
+		}
+		deleted++
+	}
+	fmt.Printf("deleted %d session(s)\n", deleted)
+	if len(failed) > 0 {
+		return fmt.Errorf("could not delete %d: %s", len(failed), strings.Join(failed, ", "))
 	}
 	return nil
 }
