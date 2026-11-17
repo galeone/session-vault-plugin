@@ -1,7 +1,7 @@
 # session-vault (Claude Code plugin)
 
-Save your Claude Code sessions to your own server with `/save`, and get them
-back on any machine with `/fetch`. End-to-end encrypted with
+Save your Claude Code sessions to your own server with `/session-vault:save`, and get them
+back on any machine with `/session-vault:fetch`. End-to-end encrypted with
 [age](https://age-encryption.org): the server only ever stores ciphertext.
 
 This repository is a Claude Code **plugin marketplace** containing a single
@@ -54,27 +54,28 @@ age built in, no separate install needed):
 session-vault keygen
 ```
 
-or ask Claude to run `/save` once and follow the warning it prints. When the
-key file exists, `/save` uploads `age(gzip(transcript))` and the server only
-stores ciphertext it cannot read; `/fetch` decrypts locally with the same key.
+or ask Claude to run `/session-vault:save` once and follow the warning it prints. When the
+key file exists, `/session-vault:save` uploads `age(gzip(transcript))` and the server only
+stores ciphertext it cannot read; `/session-vault:fetch` decrypts locally with the same key.
 Copy `age.key` to every machine that needs to fetch your sessions — **if you
 lose the key, encrypted sessions are unrecoverable**. The key file is
-compatible with the standalone `age` CLI. Without a key, `/save` still works
+compatible with the standalone `age` CLI. Without a key, `/session-vault:save` still works
 but uploads plaintext and prints a warning.
 
 ## Usage
 
 | Command | What it does |
 |---|---|
-| `/save` | Uploads the current session's transcript to the server |
-| `/save <name>` | Same, labeled with a memorable name for later restore |
-| `/fetch` | Lists saved sessions (name, id, original cwd) to choose from |
-| `/fetch <name-or-id>` | Restores that session **into the current project**, ready to resume here |
-| `/fetch all` | Mirrors every missing session back to its original project directory |
+| `/session-vault:save` | Uploads the current session's transcript to the server |
+| `/session-vault:save <name>` | Same, labeled with a memorable name for later restore |
+| `/session-vault:fetch` | Lists saved sessions (name, id, original cwd) to choose from |
+| `/session-vault:fetch <name-or-id>` | Restores that session **into the current project**, ready to resume here |
+| `/session-vault:fetch all` | Mirrors every missing session back to its original project directory |
 
-The core workflow this enables: work on Linux in `/data/you/repo`, `/save
-my-feature`, then on any other machine — different OS, different clone path —
-open the repo and run `/fetch my-feature`. The transcript is remapped into
+The core workflow this enables: work on Linux in `/data/you/repo`,
+`/session-vault:save my-feature`, then on any other machine — different OS,
+different clone path — open the repo and run `/session-vault:fetch my-feature`.
+The transcript is remapped into
 the current directory's project, and `claude --resume <id>` continues the
 session there. (The session's *history* still references paths from the
 original machine; the CLI prints a note reminding you of where it was
@@ -93,7 +94,7 @@ session without repeating the name keeps its label.
   ships a `SessionStart` hook that runs `session-vault track`, recording
   `{session_id, transcript_path, cwd}` to
   `~/.local/state/session-vault/by-cwd/<cwd-slug>.json`.
-- `/save` reads that state (falling back to the most recently modified
+- `/session-vault:save` reads that state (falling back to the most recently modified
   transcript for the project) and uploads gzip-compressed, age-encrypted when
   a key is configured.
 - Transcripts are treated as opaque blobs: their JSONL format is internal to

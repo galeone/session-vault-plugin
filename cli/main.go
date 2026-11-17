@@ -1,6 +1,6 @@
 // session-vault is the client CLI behind the session-vault Claude Code
 // plugin. It uploads Claude Code session transcripts to a session-vault
-// server (/save) and downloads them back (/fetch), end-to-end encrypted with
+// server (/session-vault:save) and downloads them back (/session-vault:fetch), end-to-end encrypted with
 // age when a key is configured.
 //
 // It is a single static binary with no runtime dependencies, so the plugin

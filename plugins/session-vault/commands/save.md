@@ -8,7 +8,7 @@ Upload the current session's transcript to the user's session-vault server.
 
 Run this command with Bash and show the user its output. If the user provided
 an argument, pass it as the session's name (letters, digits, `-`, `_` only —
-slugify it if needed) so they can later restore with `/fetch <name>`:
+slugify it if needed) so they can later restore with `/session-vault:fetch <name>`:
 
 ```
 "${CLAUDE_PLUGIN_ROOT}/scripts/session-vault.sh" save [name]

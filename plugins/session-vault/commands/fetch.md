@@ -12,7 +12,7 @@ Map the user's arguments (`$ARGUMENTS`) to a subcommand:
 - **No arguments** — run `... list` and show the table. It includes each
   session's NAME (if the user labeled it at save time), SESSION ID, and
   ORIGINAL CWD so the user can choose what to restore; tell them to run
-  `/fetch <name-or-id>` to restore one here.
+  `/session-vault:fetch <name-or-id>` to restore one here.
 - **A session id or name** — run `... get <value>`. This restores the
   session into the **current** project directory (remapping it from whatever
   machine/OS/path it was saved on) so it is immediately resumable from here.
