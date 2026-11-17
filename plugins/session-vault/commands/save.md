@@ -17,7 +17,7 @@ slugify it if needed) so they can later restore with `/session-vault:fetch <name
 - If it fails because `SESSION_VAULT_URL` or `SESSION_VAULT_TOKEN` is not
   configured, tell the user to create `~/.config/session-vault/config` with
   those two variables (see the plugin README). Do not print the token back.
-- If it warns about an unencrypted upload, relay the warning and mention that
-  running `"${CLAUDE_PLUGIN_ROOT}/scripts/session-vault.sh" keygen` once
-  enables end-to-end encryption.
+- If it reports that it generated a new age key, relay that notice verbatim:
+  the key makes the upload end-to-end encrypted, and the user must copy the
+  key file to every other machine that will fetch these sessions.
 - Report the session id that was saved and any error verbatim.

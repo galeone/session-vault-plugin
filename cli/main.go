@@ -247,28 +247,40 @@ func (c config) recipients() ([]age.Recipient, error) {
 
 // ---------- commands ----------
 
+// generateKey writes a fresh age X25519 identity to keyPath (0600, parent
+// dir 0700) and returns its public recipient. It refuses to replace an
+// existing file: a lost key means unrecoverable sessions, so overwrite is a
+// deliberate act (delete the file first).
+func generateKey(keyPath string) (age.Recipient, error) {
+	if _, err := os.Stat(keyPath); err == nil {
+		return nil, fmt.Errorf("refusing to overwrite existing key at %s", keyPath)
+	}
+	id, err := age.GenerateX25519Identity()
+	if err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(filepath.Dir(keyPath), 0o700); err != nil {
+		return nil, err
+	}
+	content := fmt.Sprintf("# created: %s\n# public key: %s\n%s\n",
+		time.Now().Format(time.RFC3339), id.Recipient(), id)
+	if err := os.WriteFile(keyPath, []byte(content), 0o600); err != nil {
+		return nil, err
+	}
+	return id.Recipient(), nil
+}
+
 func keygen() error {
 	keyPath := os.Getenv("SESSION_VAULT_AGE_KEY")
 	if keyPath == "" {
 		keyPath = filepath.Join(configDir(), "age.key")
 	}
-	if _, err := os.Stat(keyPath); err == nil {
-		return fmt.Errorf("refusing to overwrite existing key at %s", keyPath)
-	}
-	id, err := age.GenerateX25519Identity()
+	rec, err := generateKey(keyPath)
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(keyPath), 0o700); err != nil {
-		return err
-	}
-	content := fmt.Sprintf("# created: %s\n# public key: %s\n%s\n",
-		time.Now().Format(time.RFC3339), id.Recipient(), id)
-	if err := os.WriteFile(keyPath, []byte(content), 0o600); err != nil {
-		return err
-	}
 	fmt.Println("wrote", keyPath)
-	fmt.Println("public key:", id.Recipient())
+	fmt.Println("public key:", rec)
 	fmt.Println("copy this file to every machine that needs to fetch your sessions;")
 	fmt.Println("if you lose it, encrypted sessions are unrecoverable")
 	return nil
@@ -363,8 +375,16 @@ func save(name string) error {
 		return err
 	}
 	if recipients == nil {
-		fmt.Fprintf(os.Stderr, "WARNING: uploading unencrypted (no age key at %s).\n", cfg.AgeKey)
-		fmt.Fprintf(os.Stderr, "Enable end-to-end encryption with: session-vault keygen\n")
+		// No key yet: generate one so every upload is end-to-end encrypted
+		// from the first save, without the user running keygen by hand.
+		rec, err := generateKey(cfg.AgeKey)
+		if err != nil {
+			return err
+		}
+		recipients = []age.Recipient{rec}
+		fmt.Fprintf(os.Stderr, "generated a new age key at %s for end-to-end encryption.\n", cfg.AgeKey)
+		fmt.Fprintf(os.Stderr, "Copy this file to every machine that will fetch these sessions;\n")
+		fmt.Fprintf(os.Stderr, "if you lose it, the sessions are unrecoverable.\n")
 	}
 
 	body, err := encodeTranscript(transcript, recipients)

@@ -391,3 +391,40 @@ func TestDownloadSkipPresent(t *testing.T) {
 		t.Fatalf("should have skipped, got %q", got)
 	}
 }
+
+func TestGenerateKey(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "age.key")
+
+	rec, err := generateKey(path)
+	if err != nil {
+		t.Fatalf("generateKey: %v", err)
+	}
+	if rec == nil {
+		t.Fatal("want a non-nil recipient")
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("key file not written: %v", err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("want mode 0600, got %v", info.Mode().Perm())
+	}
+	// The written file must parse back to the same recipient.
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids, err := age.ParseIdentities(f)
+	f.Close()
+	if err != nil {
+		t.Fatalf("key file does not parse: %v", err)
+	}
+	if len(ids) != 1 {
+		t.Fatalf("want 1 identity, got %d", len(ids))
+	}
+	// Overwriting must be refused.
+	if _, err := generateKey(path); err == nil {
+		t.Fatal("want error when overwriting an existing key")
+	}
+}

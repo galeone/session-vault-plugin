@@ -47,20 +47,16 @@ never affected.
 
 ### End-to-end encryption (recommended)
 
-Generate an age identity once (any of these works — the plugin's binary has
-age built in, no separate install needed):
-
-```
-session-vault keygen
-```
-
-or ask Claude to run `/session-vault:save` once and follow the warning it prints. When the
-key file exists, `/session-vault:save` uploads `age(gzip(transcript))` and the server only
-stores ciphertext it cannot read; `/session-vault:fetch` decrypts locally with the same key.
-Copy `age.key` to every machine that needs to fetch your sessions — **if you
-lose the key, encrypted sessions are unrecoverable**. The key file is
-compatible with the standalone `age` CLI. Without a key, `/session-vault:save` still works
-but uploads plaintext and prints a warning.
+Every upload is end-to-end encrypted: on the first `/session-vault:save`
+the client generates an age identity for you (the binary has age built in,
+no separate install needed) and stores it at
+`~/.config/session-vault/age.key`. You can also create it ahead of time with
+`session-vault keygen`. With the key in place, `/session-vault:save` uploads
+`age(gzip(transcript))` and the server only stores ciphertext it cannot read;
+`/session-vault:fetch` decrypts locally with the same key. Copy `age.key` to
+every machine that needs to fetch your sessions — **if you lose the key,
+encrypted sessions are unrecoverable**. The key file is compatible with the
+standalone `age` CLI.
 
 ## Usage
 
