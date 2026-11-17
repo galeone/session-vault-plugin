@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/galeone/session-vault-plugin/compare/v1.1.1...v1.2.0) (2026-11-17)
+
+
+### Features
+
+* name unnamed saves after the session title Claude Code generates ([adf4ffd](https://github.com/galeone/session-vault-plugin/commit/adf4ffde2a36afacf9f88ceedd9aa4cb4eaa5846))
+
 ## [1.1.1](https://github.com/galeone/session-vault-plugin/compare/v1.1.0...v1.1.1) (2026-11-17)
 
 
