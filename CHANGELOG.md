@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/galeone/session-vault-plugin/compare/v1.0.0...v1.1.0) (2026-11-17)
+
+
+### Features
+
+* auto-generate the age key on first save ([82bda04](https://github.com/galeone/session-vault-plugin/commit/82bda044a69264ae61ed3464ef32f7973392e699))
+
 ## 1.0.0 (2026-11-15)
 
 
