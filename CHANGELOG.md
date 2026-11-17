@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.1](https://github.com/galeone/session-vault-plugin/compare/v1.1.0...v1.1.1) (2026-11-17)
+
+
+### Bug Fixes
+
+* stop gitignoring the cli source directory; test: check Close error ([f653692](https://github.com/galeone/session-vault-plugin/commit/f65369207eda38f89c671f3b296071f20fdba6db))
+
 ## [1.1.0](https://github.com/galeone/session-vault-plugin/compare/v1.0.0...v1.1.0) (2026-11-17)
 
 
