@@ -1,4 +1,5 @@
 {
+  "description": "Tags the current project as a session-vault session on SessionStart so /session-vault:save knows what to back up",
   "hooks": {
     "SessionStart": [
       {

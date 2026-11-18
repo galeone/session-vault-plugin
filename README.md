@@ -24,6 +24,9 @@ Inside Claude Code:
 
 (For local development: `/plugin marketplace add /path/to/session-vault-plugin`.)
 
+The plugin is also submitted to Anthropic's plugin directory, so it can be
+discovered and installed from the `/plugin` directory listing once approved.
+
 ## Configure
 
 Create `~/.config/session-vault/config`:
@@ -133,7 +136,8 @@ the binary on `PATH`. Cut release artifacts for all platforms with
 .claude-plugin/marketplace.json      Marketplace catalog (name: galeone-plugins)
 plugins/session-vault/
 ├── .claude-plugin/plugin.json       Plugin manifest
-├── commands/save.md, fetch.md, list.md, clean.md
+├── skills/{save,fetch,list,clean}/SKILL.md
+├── icon.png                         Directory listing icon
 ├── hooks/hooks.json                 SessionStart hook (session-vault track)
 └── scripts/session-vault.sh         Binary bootstrap wrapper
 cli/                                 Go source of the session-vault client
