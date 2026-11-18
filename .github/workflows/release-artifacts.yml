@@ -1,6 +1,6 @@
 # Builds the session-vault client for every supported platform, attaches the
 # binaries to the release created by release-please, and keeps the in-repo
-# version strings (marketplace.json, plugin.json, session-vault.sh) in sync
+# version strings (plugin.json, session-vault.sh) in sync
 # with the released tag.
 #
 # Trigger: this runs when the release-please workflow COMPLETES, not on
@@ -87,7 +87,7 @@ jobs:
           generate_release_notes: false
 
   # release-please (release-type: simple) bumps version.txt + CHANGELOG but
-  # does not know about our JSON manifests or the bootstrap script, so this
+  # does not know about our plugin manifest or the bootstrap script, so this
   # job keeps those in lockstep with the tag. It pushes straight to main.
   sync-version:
     needs: [detect, build]
@@ -101,15 +101,15 @@ jobs:
         run: |
           new="${{ needs.detect.outputs.tag }}"
           new="${new#v}"
-          market=".claude-plugin/marketplace.json"
+          # plugin.json is the single source of the version (a marketplace
+          # entry version would only shadow it and trip --strict validation).
           plugin="plugins/session-vault/.claude-plugin/plugin.json"
           script="plugins/session-vault/scripts/session-vault.sh"
           sed -i "s/^VERSION=.*$/VERSION=\"$new\"/" "$script"
-          sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$new\"/" "$market"
           sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$new\"/" "$plugin"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add "$script" "$market" "$plugin"
+          git add "$script" "$plugin"
           if git diff --cached --quiet; then
             echo "version strings already at $new"
           else
