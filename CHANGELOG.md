@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.0](https://github.com/galeone/session-vault-plugin/compare/v1.3.0...v1.4.0) (2026-11-18)
+
+
+### Features
+
+* migrate plugin to the current Claude Code format ([#9](https://github.com/galeone/session-vault-plugin/issues/9)) ([2e989f6](https://github.com/galeone/session-vault-plugin/commit/2e989f6e2e1058e720c444f502a1ae89749b63a3))
+
 ## [1.3.0](https://github.com/galeone/session-vault-plugin/compare/v1.2.0...v1.3.0) (2026-11-17)
 
 
