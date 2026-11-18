@@ -10,7 +10,6 @@
 set -euo pipefail
 
 VERSION="1.3.0"
-# TODO: point at the real GitHub repo before publishing.
 RELEASE_BASE="${SESSION_VAULT_RELEASE_BASE:-https://github.com/galeone/session-vault-plugin/releases/download/v$VERSION}"
 
 if [[ -n "${SESSION_VAULT_BIN:-}" ]]; then
