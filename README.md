@@ -61,6 +61,11 @@ every machine that needs to fetch your sessions — **if you lose the key,
 encrypted sessions are unrecoverable**. The key file is compatible with the
 standalone `age` CLI.
 
+Restores refuse sessions the server reports as unencrypted: a server that
+cannot read your sessions also must not be able to plant one you would
+then resume. Session ids and project names the server returns are validated before
+they are used as file names.
+
 ### What it runs, sends and fetches
 
 - **Runs:** one bash script and the `session-vault` CLI (downloaded from

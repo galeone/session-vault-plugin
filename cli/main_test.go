@@ -202,26 +202,13 @@ func TestRecipientsMultiple(t *testing.T) {
 	}
 }
 
-func TestEncodeTranscriptGzipOnly(t *testing.T) {
+func TestEncodeTranscriptRequiresRecipient(t *testing.T) {
 	src := filepath.Join(t.TempDir(), "s.jsonl")
 	if err := os.WriteFile(src, []byte(`{"a":1}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	r, err := encodeTranscript(src, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// should be a gzip stream
-	gz, err := gzip.NewReader(r)
-	if err != nil {
-		t.Fatalf("expected gzip, got %v", err)
-	}
-	out, err := io.ReadAll(gz)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(out) != `{"a":1}` {
-		t.Fatalf("roundtrip mismatch: %q", out)
+	if _, err := encodeTranscript(src, nil); err == nil {
+		t.Fatal("encoding without a recipient must fail")
 	}
 }
 
@@ -551,5 +538,79 @@ func TestGenerateKey(t *testing.T) {
 	// Overwriting must be refused.
 	if _, err := generateKey(path); err == nil {
 		t.Fatal("want error when overwriting an existing key")
+	}
+}
+
+// blobServer serves body for GET /api/v1/sessions/{id}.
+func blobServer(t *testing.T, body []byte) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/v1/sessions/{id}", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(body)
+	})
+	ts := httptest.NewServer(mux)
+	t.Cleanup(ts.Close)
+	return ts
+}
+
+func TestDownloadRejectsUnsafeServerPaths(t *testing.T) {
+	projects := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", projects)
+	cfg := config{URL: blobServer(t, []byte("x")).URL, Token: "tok"}
+	cases := []struct{ id, project string }{
+		{"../../evil", "proj"},
+		{"abc", "../../evil"},
+		{"abc", ""},
+		{"a/b", "proj"},
+	}
+	for _, c := range cases {
+		err := download(cfg, Meta{SessionID: c.id, Encrypted: "age+gzip"}, c.project)
+		if err == nil || !strings.Contains(err.Error(), "invalid") {
+			t.Errorf("download(id=%q, project=%q) = %v, want invalid error", c.id, c.project, err)
+		}
+	}
+}
+
+func TestDownloadRefusesPlaintext(t *testing.T) {
+	projects := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", projects)
+	cfg := config{URL: blobServer(t, []byte(`{"planted":true}`)).URL, Token: "tok"}
+	err := download(cfg, Meta{SessionID: "abc"}, "proj")
+	if err == nil || !strings.Contains(err.Error(), "not end-to-end encrypted") {
+		t.Fatalf("want plaintext refusal, got %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(projects, "projects", "proj", "abc.jsonl")); !os.IsNotExist(err) {
+		t.Fatalf("transcript must not be written, stat err = %v", err)
+	}
+}
+
+func TestDownloadDecryptsAge(t *testing.T) {
+	projects := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", projects)
+	keyPath := newAgeKey(t)
+	cfg := config{AgeKey: keyPath, Token: "tok"}
+	recs, err := cfg.recipients()
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(t.TempDir(), "s.jsonl")
+	if err := os.WriteFile(src, []byte(`{"a":1}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r, err := encodeTranscript(src, recs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blob, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.URL = blobServer(t, blob).URL
+	if err := download(cfg, Meta{SessionID: "abc", Encrypted: "age+gzip"}, "proj"); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := os.ReadFile(filepath.Join(projects, "projects", "proj", "abc.jsonl"))
+	if string(got) != `{"a":1}` {
+		t.Fatalf("got %q", got)
 	}
 }

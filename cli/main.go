@@ -384,6 +384,11 @@ func currentSession(cwd string) (id, transcript string, err error) {
 
 var validSessionName = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 
+// validPathName is what a server-supplied session id or project slug must
+// look like before it is used as a path component (same rule the server
+// enforces on upload).
+var validPathName = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+
 func save(name string) error {
 	if name != "" && !validSessionName.MatchString(name) {
 		return fmt.Errorf("invalid name %q: use letters, digits, '-' and '_' (max 64 chars)", name)
@@ -463,10 +468,13 @@ func save(name string) error {
 	return nil
 }
 
-// encodeTranscript streams the transcript as gzip (plaintext upload) or
-// age(gzip(transcript)) (end-to-end encrypted upload), encrypting to every
-// configured recipient.
+// encodeTranscript streams age(gzip(transcript)), encrypting to every
+// configured recipient. There is no plaintext encoding: at least one
+// recipient is required.
 func encodeTranscript(path string, recipients []age.Recipient) (io.Reader, error) {
+	if len(recipients) == 0 {
+		return nil, fmt.Errorf("no age recipient: refusing to upload unencrypted")
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -474,18 +482,12 @@ func encodeTranscript(path string, recipients []age.Recipient) (io.Reader, error
 	pr, pw := io.Pipe()
 	go func() {
 		defer func() { _ = f.Close() }()
-		var dst io.Writer = pw
-		var enc io.WriteCloser
-		if recipients != nil {
-			var err error
-			enc, err = age.Encrypt(pw, recipients...)
-			if err != nil {
-				pw.CloseWithError(err)
-				return
-			}
-			dst = enc
+		enc, err := age.Encrypt(pw, recipients...)
+		if err != nil {
+			pw.CloseWithError(err)
+			return
 		}
-		gz := gzip.NewWriter(dst)
+		gz := gzip.NewWriter(enc)
 		if _, err := io.Copy(gz, f); err != nil {
 			pw.CloseWithError(err)
 			return
@@ -494,11 +496,9 @@ func encodeTranscript(path string, recipients []age.Recipient) (io.Reader, error
 			pw.CloseWithError(err)
 			return
 		}
-		if enc != nil {
-			if err := enc.Close(); err != nil {
-				pw.CloseWithError(err)
-				return
-			}
+		if err := enc.Close(); err != nil {
+			pw.CloseWithError(err)
+			return
 		}
 		_ = pw.Close()
 	}()
@@ -753,13 +753,41 @@ func cleanAll(yes bool) error {
 // download fetches meta's blob and writes the decrypted transcript into the
 // given local project slug.
 func download(cfg config, meta Meta, destProject string) error {
+	// Session ids and project slugs come from the server and become file
+	// names under ~/.claude/projects: a compromised server must not be able
+	// to steer writes elsewhere ("../..") or into odd paths.
 	id := meta.SessionID
+	if !validPathName.MatchString(id) {
+		return fmt.Errorf("server returned an invalid session id %q", id)
+	}
+	if !validPathName.MatchString(destProject) {
+		return fmt.Errorf("server returned an invalid project %q for session %s", destProject, id)
+	}
 	destDir := filepath.Join(claudeProjectsDir(), destProject)
 	dest := filepath.Join(destDir, id+".jsonl")
 	if _, err := os.Stat(dest); err == nil {
 		fmt.Printf("skip    %s (already present at %s)\n", id, dest)
 		slog.Debug("download", "session_id", id, "skip", true, "dest", dest)
 		return nil
+	}
+	switch meta.Encrypted {
+	case "age+gzip":
+	case "":
+		// Every client save is age-encrypted, so a session the server
+		// reports as plaintext was not produced by us: accepting it would
+		// let a malicious server plant a transcript Claude Code then
+		// resumes (it cannot forge age ciphertext for our key, but it can
+		// claim "unencrypted").
+		return fmt.Errorf("session %s is not end-to-end encrypted; refusing to restore it", id)
+	default:
+		return fmt.Errorf("unknown encryption scheme %q; update the plugin", meta.Encrypted)
+	}
+	identities, err := cfg.identities()
+	if err != nil {
+		return err
+	}
+	if identities == nil {
+		return fmt.Errorf("session is encrypted but no age key at %s (copy it from the machine that ran keygen)", cfg.AgeKey)
 	}
 	if err := os.MkdirAll(destDir, 0o755); err != nil {
 		return err
@@ -779,29 +807,13 @@ func download(cfg config, meta Meta, destProject string) error {
 		return httpError(resp)
 	}
 
-	var src io.Reader = resp.Body
-	switch meta.Encrypted {
-	case "":
-		// plaintext transcript, stored decompressed on the server
-	case "age+gzip":
-		identities, err := cfg.identities()
-		if err != nil {
-			return err
-		}
-		if identities == nil {
-			return fmt.Errorf("session is encrypted but no age key at %s (copy it from the machine that ran keygen)", cfg.AgeKey)
-		}
-		dec, err := age.Decrypt(resp.Body, identities...)
-		if err != nil {
-			return fmt.Errorf("decrypting (wrong key?): %w", err)
-		}
-		gz, err := gzip.NewReader(dec)
-		if err != nil {
-			return fmt.Errorf("decompressing: %w", err)
-		}
-		src = gz
-	default:
-		return fmt.Errorf("unknown encryption scheme %q; update the plugin", meta.Encrypted)
+	dec, err := age.Decrypt(resp.Body, identities...)
+	if err != nil {
+		return fmt.Errorf("decrypting (wrong key?): %w", err)
+	}
+	src, err := gzip.NewReader(dec)
+	if err != nil {
+		return fmt.Errorf("decompressing: %w", err)
 	}
 
 	// Write to a temp file first so a failed download or decrypt never
