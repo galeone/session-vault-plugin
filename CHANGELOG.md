@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.1](https://github.com/galeone/session-vault-plugin/compare/v1.4.0...v1.4.1) (2026-11-20)
+
+
+### Bug Fixes
+
+* review findings — untrusted server metadata, session resolution, stale restores ([#11](https://github.com/galeone/session-vault-plugin/issues/11)) ([0a2e714](https://github.com/galeone/session-vault-plugin/commit/0a2e714d7fcdcca9071cd4ec311b903b64f8c02f))
+
 ## [1.4.0](https://github.com/galeone/session-vault-plugin/compare/v1.3.0...v1.4.0) (2026-11-18)
 
 
