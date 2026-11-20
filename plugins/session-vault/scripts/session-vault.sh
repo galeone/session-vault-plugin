@@ -65,7 +65,16 @@ if [[ ! -x "$bin" ]]; then
     echo "session-vault: no checksum for $artifact in checksums.txt; refusing to install an unverified binary" >&2
     exit 1
   fi
-  actual=$(sha256sum "$bin.tmp" | awk '{print $1}')
+  # sha256sum is GNU coreutils (Linux, Git Bash); stock macOS ships
+  # shasum instead.
+  if command -v sha256sum >/dev/null 2>&1; then
+    actual=$(sha256sum "$bin.tmp" | awk '{print $1}')
+  elif command -v shasum >/dev/null 2>&1; then
+    actual=$(shasum -a 256 "$bin.tmp" | awk '{print $1}')
+  else
+    echo "session-vault: need sha256sum or shasum to verify the download" >&2
+    exit 1
+  fi
   if [[ "$actual" != "$expected" ]]; then
     echo "session-vault: checksum mismatch for $artifact (expected $expected, got $actual)" >&2
     exit 1

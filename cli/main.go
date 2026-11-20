@@ -31,6 +31,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -45,6 +46,24 @@ import (
 var version = "dev"
 
 var nonAlnum = regexp.MustCompile(`[^A-Za-z0-9]`)
+
+// httpClient bounds every phase of a request that can hang on a dead or
+// slow server — connect, TLS, waiting for the response headers — without
+// capping the total time, which must stay open-ended for large uploads
+// and downloads on slow links.
+var httpClient = &http.Client{
+	Transport: &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		TLSHandshakeTimeout:   15 * time.Second,
+		ResponseHeaderTimeout: 2 * time.Minute,
+		IdleConnTimeout:       90 * time.Second,
+		ForceAttemptHTTP2:     true,
+	},
+}
 
 type Meta struct {
 	SessionID  string    `json:"session_id"`
@@ -751,7 +770,7 @@ func download(cfg config, meta Meta, destProject string) error {
 		return err
 	}
 	req.Header.Set("Authorization", "Bearer "+cfg.Token)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return err
 	}
@@ -810,7 +829,7 @@ func download(cfg config, meta Meta, destProject string) error {
 // ---------- http helpers ----------
 
 func doJSON(req *http.Request, out any) error {
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return err
 	}
