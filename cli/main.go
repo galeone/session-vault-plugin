@@ -1,7 +1,7 @@
 // session-vault is the client CLI behind the session-vault Claude Code
 // plugin. It uploads Claude Code session transcripts to a session-vault
-// server (/session-vault:save) and downloads them back (/session-vault:fetch), end-to-end encrypted with
-// age when a key is configured.
+// server (/session-vault:save) and downloads them back (/session-vault:fetch),
+// always end-to-end encrypted with age (a key is generated on first save).
 //
 // It is a single static binary with no runtime dependencies, so the plugin
 // works the same on Linux, macOS, and native Windows (Git Bash).
@@ -530,17 +530,11 @@ func save(name, sessionID string) error {
 	if err := doJSON(req, &meta); err != nil {
 		return err
 	}
-	enc := "encrypted"
-	if meta.Encrypted == "" {
-		// The server did not record the scheme we declared: still
-		// ciphertext on disk, but say so rather than claim otherwise.
-		enc = "encrypted, scheme not recorded by the server"
-	}
 	label := ""
 	if meta.Name != "" {
 		label = fmt.Sprintf(" as %q", meta.Name)
 	}
-	fmt.Printf("saved session %s%s (%s, %d bytes stored) from %s\n", meta.SessionID, label, enc, meta.Size, transcript)
+	fmt.Printf("saved session %s%s (encrypted, %d bytes stored) from %s\n", meta.SessionID, label, meta.Size, transcript)
 	slog.Debug("save", "session_id", meta.SessionID, "name", meta.Name, "size", meta.Size, "encrypted", meta.Encrypted, "transcript", transcript)
 	return nil
 }
@@ -592,14 +586,12 @@ func list() error {
 		return err
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	if _, err := fmt.Fprintln(w, "NAME\tSESSION ID\tORIGINAL CWD\tUPLOADED AT\tBYTES\tENCRYPTED"); err != nil {
+	// No encryption column: every session is age-encrypted (restores
+	// refuse anything else).
+	if _, err := fmt.Fprintln(w, "NAME\tSESSION ID\tORIGINAL CWD\tUPLOADED AT\tBYTES"); err != nil {
 		return err
 	}
 	for _, m := range metas {
-		enc := m.Encrypted
-		if enc == "" {
-			enc = "no"
-		}
 		name := m.Name
 		if name == "" {
 			name = "-"
@@ -608,8 +600,8 @@ func list() error {
 		if cwd == "" {
 			cwd = m.Project
 		}
-		if _, err := fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d\t%s\n",
-			name, m.SessionID, cwd, m.UploadedAt.Format(time.RFC3339), m.Size, enc); err != nil {
+		if _, err := fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d\n",
+			name, m.SessionID, cwd, m.UploadedAt.Format(time.RFC3339), m.Size); err != nil {
 			return err
 		}
 	}

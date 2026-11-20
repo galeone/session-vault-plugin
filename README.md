@@ -54,11 +54,12 @@ Every upload is end-to-end encrypted, always: on the first `/session-vault:save`
 the client generates an age identity for you (the binary has age built in,
 no separate install needed) and stores it at
 `~/.config/session-vault/age.key`. You can also create it ahead of time with
-`session-vault keygen`. With the key in place, `/session-vault:save` uploads
-`age(gzip(transcript))` and the server only stores ciphertext it cannot read;
+`session-vault keygen`. `/session-vault:save` uploads
+`age(gzip(transcript))` and the server only stores ciphertext it cannot read
+(it refuses anything else);
 `/session-vault:fetch` decrypts locally with the same key. Copy `age.key` to
 every machine that needs to fetch your sessions — **if you lose the key,
-encrypted sessions are unrecoverable**. The key file is compatible with the
+your sessions are unrecoverable**. The key file is compatible with the
 standalone `age` CLI.
 
 Restores refuse sessions the server reports as unencrypted: a server that
