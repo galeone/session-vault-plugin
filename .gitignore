@@ -1,3 +1,5 @@
 cli/dist/
 cli/session-vault
 cli/session-vault.exe
+# default output of `go build` run inside cli/
+cli/cli
