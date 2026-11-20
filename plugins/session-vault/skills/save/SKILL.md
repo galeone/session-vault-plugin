@@ -14,8 +14,11 @@ the title Claude Code generated for it (the one shown in the terminal title);
 mention that name in your summary:
 
 ```
-"${CLAUDE_PLUGIN_ROOT}/scripts/session-vault.sh" save [name]
+"${CLAUDE_PLUGIN_ROOT}/scripts/session-vault.sh" save --session "${CLAUDE_SESSION_ID}" [name]
 ```
+
+Keep the `--session "${CLAUDE_SESSION_ID}"` argument exactly as written: it
+identifies this session even if the shell has changed directory.
 
 - If it fails because `SESSION_VAULT_URL` or `SESSION_VAULT_TOKEN` is not
   configured, tell the user to create `~/.config/session-vault/config` with

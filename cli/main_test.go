@@ -202,26 +202,13 @@ func TestRecipientsMultiple(t *testing.T) {
 	}
 }
 
-func TestEncodeTranscriptGzipOnly(t *testing.T) {
+func TestEncodeTranscriptRequiresRecipient(t *testing.T) {
 	src := filepath.Join(t.TempDir(), "s.jsonl")
 	if err := os.WriteFile(src, []byte(`{"a":1}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	r, err := encodeTranscript(src, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// should be a gzip stream
-	gz, err := gzip.NewReader(r)
-	if err != nil {
-		t.Fatalf("expected gzip, got %v", err)
-	}
-	out, err := io.ReadAll(gz)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(out) != `{"a":1}` {
-		t.Fatalf("roundtrip mismatch: %q", out)
+	if _, err := encodeTranscript(src, nil); err == nil {
+		t.Fatal("encoding without a recipient must fail")
 	}
 }
 
@@ -551,5 +538,255 @@ func TestGenerateKey(t *testing.T) {
 	// Overwriting must be refused.
 	if _, err := generateKey(path); err == nil {
 		t.Fatal("want error when overwriting an existing key")
+	}
+}
+
+// blobServer serves body for GET /api/v1/sessions/{id}.
+func blobServer(t *testing.T, body []byte) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/v1/sessions/{id}", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(body)
+	})
+	ts := httptest.NewServer(mux)
+	t.Cleanup(ts.Close)
+	return ts
+}
+
+func TestDownloadRejectsUnsafeServerPaths(t *testing.T) {
+	projects := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", projects)
+	cfg := config{URL: blobServer(t, []byte("x")).URL, Token: "tok"}
+	cases := []struct{ id, project string }{
+		{"../../evil", "proj"},
+		{"abc", "../../evil"},
+		{"abc", ""},
+		{"a/b", "proj"},
+	}
+	for _, c := range cases {
+		err := download(cfg, Meta{SessionID: c.id, Encrypted: "age+gzip"}, c.project)
+		if err == nil || !strings.Contains(err.Error(), "invalid") {
+			t.Errorf("download(id=%q, project=%q) = %v, want invalid error", c.id, c.project, err)
+		}
+	}
+}
+
+func TestDownloadRefusesPlaintext(t *testing.T) {
+	projects := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", projects)
+	cfg := config{URL: blobServer(t, []byte(`{"planted":true}`)).URL, Token: "tok"}
+	err := download(cfg, Meta{SessionID: "abc"}, "proj")
+	if err == nil || !strings.Contains(err.Error(), "not end-to-end encrypted") {
+		t.Fatalf("want plaintext refusal, got %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(projects, "projects", "proj", "abc.jsonl")); !os.IsNotExist(err) {
+		t.Fatalf("transcript must not be written, stat err = %v", err)
+	}
+}
+
+func TestDownloadDecryptsAge(t *testing.T) {
+	projects := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", projects)
+	keyPath := newAgeKey(t)
+	cfg := config{AgeKey: keyPath, Token: "tok"}
+	recs, err := cfg.recipients()
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(t.TempDir(), "s.jsonl")
+	if err := os.WriteFile(src, []byte(`{"a":1}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r, err := encodeTranscript(src, recs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blob, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.URL = blobServer(t, blob).URL
+	if err := download(cfg, Meta{SessionID: "abc", Encrypted: "age+gzip"}, "proj"); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := os.ReadFile(filepath.Join(projects, "projects", "proj", "abc.jsonl"))
+	if string(got) != `{"a":1}` {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestSessionByIDFromState(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	transcript := filepath.Join(t.TempDir(), "sid1.jsonl")
+	if err := os.WriteFile(transcript, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	payload := fmt.Sprintf(`{"session_id":"sid1","transcript_path":%q,"cwd":"/work/repo"}`, transcript)
+	if err := trackFrom(strings.NewReader(payload)); err != nil {
+		t.Fatal(err)
+	}
+	// A second session in another project must not be picked.
+	if err := trackFrom(strings.NewReader(`{"session_id":"other","transcript_path":"/nope","cwd":"/elsewhere"}`)); err != nil {
+		t.Fatal(err)
+	}
+	got, project, cwd, err := sessionByID("sid1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != transcript || project != "-work-repo" || cwd != "/work/repo" {
+		t.Fatalf("got %q %q %q", got, project, cwd)
+	}
+}
+
+func TestSessionByIDSearchesProjects(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	base := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", base)
+	dir := filepath.Join(base, "projects", "-some-project")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(dir, "sid2.jsonl")
+	if err := os.WriteFile(want, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, project, cwd, err := sessionByID("sid2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want || project != "-some-project" || cwd != "" {
+		t.Fatalf("got %q %q %q", got, project, cwd)
+	}
+	if _, _, _, err := sessionByID("missing"); err == nil {
+		t.Fatal("want an error for an unknown id")
+	}
+}
+
+// encryptedBlob returns age(gzip(content)) for the key at keyPath.
+func encryptedBlob(t *testing.T, keyPath, content string) []byte {
+	t.Helper()
+	recs, err := config{AgeKey: keyPath}.recipients()
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(t.TempDir(), "s.jsonl")
+	if err := os.WriteFile(src, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r, err := encodeTranscript(src, recs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+func TestDownloadReplacesStaleLocalCopy(t *testing.T) {
+	projects := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", projects)
+	keyPath := newAgeKey(t)
+	cfg := config{AgeKey: keyPath, Token: "tok", URL: blobServer(t, encryptedBlob(t, keyPath, "new")).URL}
+
+	dest := filepath.Join(projects, "projects", "proj", "abc.jsonl")
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dest, []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(dest, old, old); err != nil {
+		t.Fatal(err)
+	}
+
+	meta := Meta{SessionID: "abc", Encrypted: "age+gzip", UploadedAt: time.Now().Add(-time.Minute)}
+	if err := download(cfg, meta, "proj"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(dest); string(got) != "new" {
+		t.Fatalf("stale copy not replaced: %q", got)
+	}
+	backups, _ := filepath.Glob(dest + ".*.bak")
+	if len(backups) != 1 {
+		t.Fatalf("want one backup, got %v", backups)
+	}
+	if got, _ := os.ReadFile(backups[0]); string(got) != "old" {
+		t.Fatalf("backup content %q", got)
+	}
+
+	// The fresh copy is now newer than the upload: a second fetch skips.
+	if err := download(cfg, meta, "proj"); err != nil {
+		t.Fatal(err)
+	}
+	if backups, _ := filepath.Glob(dest + ".*.bak"); len(backups) != 1 {
+		t.Fatalf("second fetch should skip, backups: %v", backups)
+	}
+}
+
+func TestDownloadKeepsNewerLocalCopy(t *testing.T) {
+	projects := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", projects)
+	cfg := config{URL: "http://unused", Token: "tok"}
+	dest := filepath.Join(projects, "projects", "proj", "abc.jsonl")
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dest, []byte("local progress"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	meta := Meta{SessionID: "abc", Encrypted: "age+gzip", UploadedAt: time.Now().Add(-time.Hour)}
+	if err := download(cfg, meta, "proj"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(dest); string(got) != "local progress" {
+		t.Fatalf("newer local copy replaced: %q", got)
+	}
+}
+
+// With transcripts of one id in two projects, the most recently written
+// one is the live session, even when the hook state points at the other.
+func TestSessionByIDPrefersNewestTranscript(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	base := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", base)
+	write := func(project string, age time.Duration) string {
+		t.Helper()
+		dir := filepath.Join(base, "projects", project)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		p := filepath.Join(dir, "sid.jsonl")
+		if err := os.WriteFile(p, []byte("{}\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		at := time.Now().Add(-age)
+		if err := os.Chtimes(p, at, at); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	old := write("-work-a", time.Hour)
+	live := write("-work-b", 0)
+	if err := trackFrom(strings.NewReader(fmt.Sprintf(`{"session_id":"sid","transcript_path":%q,"cwd":"/work/a"}`, old))); err != nil {
+		t.Fatal(err)
+	}
+	got, project, cwd, err := sessionByID("sid")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != live || project != "-work-b" || cwd != "" {
+		t.Fatalf("got %q %q %q, want the live transcript in -work-b", got, project, cwd)
+	}
+
+	// Once the hook has tracked the live one too, its cwd is known.
+	if err := trackFrom(strings.NewReader(fmt.Sprintf(`{"session_id":"sid","transcript_path":%q,"cwd":"/work/b"}`, live))); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, cwd, _ := sessionByID("sid"); cwd != "/work/b" {
+		t.Fatalf("cwd = %q, want /work/b", cwd)
 	}
 }

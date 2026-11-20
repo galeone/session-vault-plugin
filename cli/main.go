@@ -1,7 +1,7 @@
 // session-vault is the client CLI behind the session-vault Claude Code
 // plugin. It uploads Claude Code session transcripts to a session-vault
-// server (/session-vault:save) and downloads them back (/session-vault:fetch), end-to-end encrypted with
-// age when a key is configured.
+// server (/session-vault:save) and downloads them back (/session-vault:fetch),
+// always end-to-end encrypted with age (a key is generated on first save).
 //
 // It is a single static binary with no runtime dependencies, so the plugin
 // works the same on Linux, macOS, and native Windows (Git Bash).
@@ -10,7 +10,8 @@
 //
 //	session-vault keygen            generate the age identity (once per user)
 //	session-vault track             SessionStart hook: record session info from stdin JSON
-//	session-vault save [name]       upload the current project's session (auto-named from the session title)
+//	session-vault save [--session <id>] [name]
+//	                                upload the current session (auto-named from the session title)
 //	session-vault list              list sessions stored on the server
 //	session-vault get <session-id>  download one session into ~/.claude/projects/
 //	session-vault all               download every session missing locally
@@ -31,6 +32,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -45,6 +47,24 @@ import (
 var version = "dev"
 
 var nonAlnum = regexp.MustCompile(`[^A-Za-z0-9]`)
+
+// httpClient bounds every phase of a request that can hang on a dead or
+// slow server — connect, TLS, waiting for the response headers — without
+// capping the total time, which must stay open-ended for large uploads
+// and downloads on slow links.
+var httpClient = &http.Client{
+	Transport: &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		TLSHandshakeTimeout:   15 * time.Second,
+		ResponseHeaderTimeout: 2 * time.Minute,
+		IdleConnTimeout:       90 * time.Second,
+		ForceAttemptHTTP2:     true,
+	},
+}
 
 type Meta struct {
 	SessionID  string    `json:"session_id"`
@@ -68,11 +88,21 @@ func main() {
 	case "track":
 		err = track()
 	case "save":
-		name := ""
-		if len(os.Args) > 2 {
-			name = os.Args[2]
+		var name, sessionID string
+		args := os.Args[2:]
+		for len(args) > 0 {
+			switch {
+			case args[0] == "--session" && len(args) > 1:
+				sessionID, args = args[1], args[2:]
+			case strings.HasPrefix(args[0], "--session="):
+				sessionID, args = strings.TrimPrefix(args[0], "--session="), args[1:]
+			case name == "" && !strings.HasPrefix(args[0], "--"):
+				name, args = args[0], args[1:]
+			default:
+				usage()
+			}
 		}
-		err = save(name)
+		err = save(name, sessionID)
 	case "list":
 		err = list()
 	case "get":
@@ -105,7 +135,10 @@ func usage() {
 
   keygen            generate the age identity used for end-to-end encryption
   track             (hook) record the current session from stdin JSON
-  save [name]       upload the current project's session, optionally labeled
+  save [--session <id>] [name]
+                    upload the current session, optionally labeled; --session
+                    names it exactly (the skill passes Claude Code's id),
+                    otherwise it is resolved from the working directory
   list              list sessions stored on the server
   get <id-or-name>  restore one session into the CURRENT project directory,
                     so it is resumable from here with claude --resume
@@ -330,6 +363,53 @@ func trackFrom(r io.Reader) error {
 	return nil
 }
 
+// sessionByID locates the transcript of a known session id, wherever its
+// project lives. It is what makes save independent of the shell's current
+// directory, which drifts when Claude cd's into a subdirectory.
+//
+// The same id can have transcripts in several projects (a session saved
+// on one machine and restored into another project here, or resumed in a
+// second directory): the most recently written one is the live session.
+// The track hook's state supplies the original cwd for it when known.
+func sessionByID(id string) (transcript, project, cwd string, err error) {
+	cwdOf := map[string]string{}
+	states, _ := filepath.Glob(filepath.Join(stateDir(), "by-cwd", "*.json"))
+	for _, path := range states {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var st struct {
+			SessionID      string `json:"session_id"`
+			TranscriptPath string `json:"transcript_path"`
+			Cwd            string `json:"cwd"`
+		}
+		if json.Unmarshal(data, &st) == nil && st.SessionID == id && st.TranscriptPath != "" && st.Cwd != "" {
+			cwdOf[filepath.Clean(st.TranscriptPath)] = st.Cwd
+		}
+	}
+	candidates, _ := filepath.Glob(filepath.Join(claudeProjectsDir(), "*", id+".jsonl"))
+	for t := range cwdOf {
+		candidates = append(candidates, t)
+	}
+	var newestTime time.Time
+	for _, c := range candidates {
+		info, err := os.Stat(c)
+		if err == nil && !info.IsDir() && info.ModTime().After(newestTime) {
+			transcript, newestTime = filepath.Clean(c), info.ModTime()
+		}
+	}
+	if transcript == "" {
+		return "", "", "", fmt.Errorf("no transcript found for session %s", id)
+	}
+	if cwd = cwdOf[transcript]; cwd != "" {
+		return transcript, projectSlug(cwd), cwd, nil
+	}
+	// The project slug is the directory name; the original cwd is not
+	// recoverable from it, so the caller keeps its own.
+	return transcript, filepath.Base(filepath.Dir(transcript)), "", nil
+}
+
 // currentSession resolves the session id and transcript path for cwd: first
 // from the state file written by the track hook, then by falling back to the
 // most recently modified transcript for the project.
@@ -365,7 +445,12 @@ func currentSession(cwd string) (id, transcript string, err error) {
 
 var validSessionName = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 
-func save(name string) error {
+// validPathName is what a server-supplied session id or project slug must
+// look like before it is used as a path component (same rule the server
+// enforces on upload).
+var validPathName = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+
+func save(name, sessionID string) error {
 	if name != "" && !validSessionName.MatchString(name) {
 		return fmt.Errorf("invalid name %q: use letters, digits, '-' and '_' (max 64 chars)", name)
 	}
@@ -377,9 +462,25 @@ func save(name string) error {
 	if err != nil {
 		return err
 	}
-	id, transcript, err := currentSession(cwd)
-	if err != nil {
-		return err
+	var id, transcript, project string
+	// An empty or malformed --session (e.g. an older Claude Code that does
+	// not substitute ${CLAUDE_SESSION_ID}) falls back to the cwd lookup.
+	if validPathName.MatchString(sessionID) {
+		var sessCwd string
+		if transcript, project, sessCwd, err = sessionByID(sessionID); err == nil {
+			id = sessionID
+			if sessCwd != "" {
+				cwd = sessCwd
+			}
+		} else {
+			slog.Debug("session lookup by id failed, falling back to cwd", "session_id", sessionID, "error", err)
+		}
+	}
+	if transcript == "" {
+		if id, transcript, err = currentSession(cwd); err != nil {
+			return err
+		}
+		project = projectSlug(cwd)
 	}
 	if name == "" {
 		if title := sessionTitle(transcript); title != "" {
@@ -415,40 +516,36 @@ func save(name string) error {
 	}
 	req.Header.Set("Authorization", "Bearer "+cfg.Token)
 	req.Header.Set("X-Session-Id", id)
-	req.Header.Set("X-Project", projectSlug(cwd))
+	req.Header.Set("X-Project", project)
 	req.Header.Set("X-Cwd", cwd)
 	if name != "" {
 		req.Header.Set("X-Name", name)
 	}
-	if recipients != nil {
-		req.Header.Set("Content-Type", "application/octet-stream")
-		req.Header.Set("X-Encrypted", "age+gzip")
-	} else {
-		req.Header.Set("Content-Type", "application/x-ndjson")
-		req.Header.Set("Content-Encoding", "gzip")
-	}
+	// Every upload is age(gzip(transcript)): a key is generated above when
+	// none exists, so there is no plaintext upload path.
+	req.Header.Set("Content-Type", "application/octet-stream")
+	req.Header.Set("X-Encrypted", "age+gzip")
 
 	var meta Meta
 	if err := doJSON(req, &meta); err != nil {
 		return err
 	}
-	enc := "encrypted"
-	if meta.Encrypted == "" {
-		enc = "UNENCRYPTED"
-	}
 	label := ""
 	if meta.Name != "" {
 		label = fmt.Sprintf(" as %q", meta.Name)
 	}
-	fmt.Printf("saved session %s%s (%s, %d bytes stored) from %s\n", meta.SessionID, label, enc, meta.Size, transcript)
+	fmt.Printf("saved session %s%s (encrypted, %d bytes stored) from %s\n", meta.SessionID, label, meta.Size, transcript)
 	slog.Debug("save", "session_id", meta.SessionID, "name", meta.Name, "size", meta.Size, "encrypted", meta.Encrypted, "transcript", transcript)
 	return nil
 }
 
-// encodeTranscript streams the transcript as gzip (plaintext upload) or
-// age(gzip(transcript)) (end-to-end encrypted upload), encrypting to every
-// configured recipient.
+// encodeTranscript streams age(gzip(transcript)), encrypting to every
+// configured recipient. There is no plaintext encoding: at least one
+// recipient is required.
 func encodeTranscript(path string, recipients []age.Recipient) (io.Reader, error) {
+	if len(recipients) == 0 {
+		return nil, fmt.Errorf("no age recipient: refusing to upload unencrypted")
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -456,18 +553,12 @@ func encodeTranscript(path string, recipients []age.Recipient) (io.Reader, error
 	pr, pw := io.Pipe()
 	go func() {
 		defer func() { _ = f.Close() }()
-		var dst io.Writer = pw
-		var enc io.WriteCloser
-		if recipients != nil {
-			var err error
-			enc, err = age.Encrypt(pw, recipients...)
-			if err != nil {
-				pw.CloseWithError(err)
-				return
-			}
-			dst = enc
+		enc, err := age.Encrypt(pw, recipients...)
+		if err != nil {
+			pw.CloseWithError(err)
+			return
 		}
-		gz := gzip.NewWriter(dst)
+		gz := gzip.NewWriter(enc)
 		if _, err := io.Copy(gz, f); err != nil {
 			pw.CloseWithError(err)
 			return
@@ -476,11 +567,9 @@ func encodeTranscript(path string, recipients []age.Recipient) (io.Reader, error
 			pw.CloseWithError(err)
 			return
 		}
-		if enc != nil {
-			if err := enc.Close(); err != nil {
-				pw.CloseWithError(err)
-				return
-			}
+		if err := enc.Close(); err != nil {
+			pw.CloseWithError(err)
+			return
 		}
 		_ = pw.Close()
 	}()
@@ -497,14 +586,12 @@ func list() error {
 		return err
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	if _, err := fmt.Fprintln(w, "NAME\tSESSION ID\tORIGINAL CWD\tUPLOADED AT\tBYTES\tENCRYPTED"); err != nil {
+	// No encryption column: every session is age-encrypted (restores
+	// refuse anything else).
+	if _, err := fmt.Fprintln(w, "NAME\tSESSION ID\tORIGINAL CWD\tUPLOADED AT\tBYTES"); err != nil {
 		return err
 	}
 	for _, m := range metas {
-		enc := m.Encrypted
-		if enc == "" {
-			enc = "no"
-		}
 		name := m.Name
 		if name == "" {
 			name = "-"
@@ -513,8 +600,8 @@ func list() error {
 		if cwd == "" {
 			cwd = m.Project
 		}
-		if _, err := fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d\t%s\n",
-			name, m.SessionID, cwd, m.UploadedAt.Format(time.RFC3339), m.Size, enc); err != nil {
+		if _, err := fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d\n",
+			name, m.SessionID, cwd, m.UploadedAt.Format(time.RFC3339), m.Size); err != nil {
 			return err
 		}
 	}
@@ -563,7 +650,6 @@ func get(key string) error {
 	return nil
 }
 
-// resolve matches key against session ids first, then against user-chosen
 // sessionTitle returns the AI-generated title Claude Code writes into the
 // transcript ("type":"ai-title" lines, repeated as the title is
 // regenerated); the last occurrence wins. Empty when the transcript has
@@ -613,6 +699,7 @@ func slugify(s string) string {
 	return out
 }
 
+// resolve matches key against session ids first, then against user-chosen
 // names. An ambiguous name (reused across saves) is an error listing the ids.
 func resolve(cfg config, key string) (Meta, error) {
 	metas, err := listSessions(cfg)
@@ -735,13 +822,50 @@ func cleanAll(yes bool) error {
 // download fetches meta's blob and writes the decrypted transcript into the
 // given local project slug.
 func download(cfg config, meta Meta, destProject string) error {
+	// Session ids and project slugs come from the server and become file
+	// names under ~/.claude/projects: a compromised server must not be able
+	// to steer writes elsewhere ("../..") or into odd paths.
 	id := meta.SessionID
+	if !validPathName.MatchString(id) {
+		return fmt.Errorf("server returned an invalid session id %q", id)
+	}
+	if !validPathName.MatchString(destProject) {
+		return fmt.Errorf("server returned an invalid project %q for session %s", destProject, id)
+	}
 	destDir := filepath.Join(claudeProjectsDir(), destProject)
 	dest := filepath.Join(destDir, id+".jsonl")
-	if _, err := os.Stat(dest); err == nil {
-		fmt.Printf("skip    %s (already present at %s)\n", id, dest)
-		slog.Debug("download", "session_id", id, "skip", true, "dest", dest)
-		return nil
+	// An existing local transcript is kept unless the server holds a
+	// strictly newer save (e.g. the session continued on another machine
+	// and was saved there). Local writes after our last fetch or save bump
+	// the mtime past uploaded_at, so unsaved local progress is never
+	// replaced; a replaced copy is kept next to it as a .bak.
+	replace := false
+	if info, err := os.Stat(dest); err == nil {
+		if meta.UploadedAt.IsZero() || !meta.UploadedAt.After(info.ModTime()) {
+			fmt.Printf("skip    %s (local copy at %s is up to date)\n", id, dest)
+			slog.Debug("download", "session_id", id, "skip", true, "dest", dest)
+			return nil
+		}
+		replace = true
+	}
+	switch meta.Encrypted {
+	case "age+gzip":
+	case "":
+		// Every client save is age-encrypted, so a session the server
+		// reports as plaintext was not produced by us: accepting it would
+		// let a malicious server plant a transcript Claude Code then
+		// resumes (it cannot forge age ciphertext for our key, but it can
+		// claim "unencrypted").
+		return fmt.Errorf("session %s is not end-to-end encrypted; refusing to restore it", id)
+	default:
+		return fmt.Errorf("unknown encryption scheme %q; update the plugin", meta.Encrypted)
+	}
+	identities, err := cfg.identities()
+	if err != nil {
+		return err
+	}
+	if identities == nil {
+		return fmt.Errorf("session is encrypted but no age key at %s (copy it from the machine that ran keygen)", cfg.AgeKey)
 	}
 	if err := os.MkdirAll(destDir, 0o755); err != nil {
 		return err
@@ -752,7 +876,7 @@ func download(cfg config, meta Meta, destProject string) error {
 		return err
 	}
 	req.Header.Set("Authorization", "Bearer "+cfg.Token)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return err
 	}
@@ -761,29 +885,13 @@ func download(cfg config, meta Meta, destProject string) error {
 		return httpError(resp)
 	}
 
-	var src io.Reader = resp.Body
-	switch meta.Encrypted {
-	case "":
-		// plaintext transcript, stored decompressed on the server
-	case "age+gzip":
-		identities, err := cfg.identities()
-		if err != nil {
-			return err
-		}
-		if identities == nil {
-			return fmt.Errorf("session is encrypted but no age key at %s (copy it from the machine that ran keygen)", cfg.AgeKey)
-		}
-		dec, err := age.Decrypt(resp.Body, identities...)
-		if err != nil {
-			return fmt.Errorf("decrypting (wrong key?): %w", err)
-		}
-		gz, err := gzip.NewReader(dec)
-		if err != nil {
-			return fmt.Errorf("decompressing: %w", err)
-		}
-		src = gz
-	default:
-		return fmt.Errorf("unknown encryption scheme %q; update the plugin", meta.Encrypted)
+	dec, err := age.Decrypt(resp.Body, identities...)
+	if err != nil {
+		return fmt.Errorf("decrypting (wrong key?): %w", err)
+	}
+	src, err := gzip.NewReader(dec)
+	if err != nil {
+		return fmt.Errorf("decompressing: %w", err)
 	}
 
 	// Write to a temp file first so a failed download or decrypt never
@@ -800,6 +908,13 @@ func download(cfg config, meta Meta, destProject string) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
+	if replace {
+		backup := dest + "." + time.Now().UTC().Format("20060102T150405Z") + ".bak"
+		if err := os.Rename(dest, backup); err != nil {
+			return fmt.Errorf("backing up the local copy: %w", err)
+		}
+		fmt.Printf("updated %s: the server copy is newer; previous local copy kept at %s\n", id, backup)
+	}
 	if err := os.Rename(tmp.Name(), dest); err != nil {
 		return err
 	}
@@ -811,7 +926,7 @@ func download(cfg config, meta Meta, destProject string) error {
 // ---------- http helpers ----------
 
 func doJSON(req *http.Request, out any) error {
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return err
 	}

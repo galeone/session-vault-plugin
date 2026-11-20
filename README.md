@@ -48,18 +48,24 @@ The CLI logs structured text (slog) to stderr and to a daily file named
 warn|error` (default `info`) sets the level; command output on stdout is
 never affected.
 
-### End-to-end encryption (recommended)
+### End-to-end encryption
 
-Every upload is end-to-end encrypted: on the first `/session-vault:save`
+Every upload is end-to-end encrypted, always: on the first `/session-vault:save`
 the client generates an age identity for you (the binary has age built in,
 no separate install needed) and stores it at
 `~/.config/session-vault/age.key`. You can also create it ahead of time with
-`session-vault keygen`. With the key in place, `/session-vault:save` uploads
-`age(gzip(transcript))` and the server only stores ciphertext it cannot read;
+`session-vault keygen`. `/session-vault:save` uploads
+`age(gzip(transcript))` and the server only stores ciphertext it cannot read
+(it refuses anything else);
 `/session-vault:fetch` decrypts locally with the same key. Copy `age.key` to
 every machine that needs to fetch your sessions — **if you lose the key,
-encrypted sessions are unrecoverable**. The key file is compatible with the
+your sessions are unrecoverable**. The key file is compatible with the
 standalone `age` CLI.
+
+Restores refuse sessions the server reports as unencrypted: a server that
+cannot read your sessions also must not be able to plant one you would
+then resume. Session ids and project names the server returns are validated before
+they are used as file names.
 
 ### What it runs, sends and fetches
 
@@ -93,7 +99,11 @@ session there. (The session's *history* still references paths from the
 original machine; the CLI prints a note reminding you of where it was
 recorded.)
 
-Restores never overwrite an existing local transcript. Re-saving a labeled
+Restores keep an existing local transcript unless the server holds a
+newer save of it (e.g. you continued the session on another machine and
+saved it there); the replaced local copy is kept next to it as
+`<id>.jsonl.<timestamp>.bak`. Local progress made after your last fetch or
+save is never replaced. Re-saving a labeled
 session without repeating the name keeps its label. When you save without a
 name, the CLI uses the session title Claude Code generates (the one shown in
 the terminal title) — e.g. `Apple access from Teams thread` becomes
@@ -110,9 +120,13 @@ automatically.
   ships a `SessionStart` hook that runs `session-vault track`, recording
   `{session_id, transcript_path, cwd}` to
   `~/.local/state/session-vault/by-cwd/<cwd-slug>.json`.
-- `/session-vault:save` reads that state (falling back to the most recently modified
-  transcript for the project) and uploads gzip-compressed, age-encrypted when
-  a key is configured.
+- `/session-vault:save` passes Claude Code's own session id
+  (`${CLAUDE_SESSION_ID}`) to the CLI, which finds that session's transcript
+  through the recorded state or by searching the project directories, so
+  it works even after the shell has changed directory. Without an id
+  (older Claude Code) it reads the state for the current directory
+  (falling back to the most recently modified transcript for the project) and uploads it gzip-compressed and
+  age-encrypted (a key is generated on the first save if none exists).
 - Transcripts are treated as opaque blobs: their JSONL format is internal to
   Claude Code and changes between versions, so nothing here parses them.
 
@@ -136,8 +150,8 @@ the binary on `PATH`. Cut release artifacts for all platforms with
 ## Security notes
 
 - Transcripts can contain source code, secrets pasted into the chat, and
-  command output. Enable end-to-end encryption (above) so the server only
-  stores ciphertext, and always use HTTPS.
+  command output. Uploads are always end-to-end encrypted (above), so the
+  server only stores ciphertext; still, always use HTTPS.
 - The token is sent as a `Bearer` header; keep the config file and age key
   private (`chmod 600`).
 
