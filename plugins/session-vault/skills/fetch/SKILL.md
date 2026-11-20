@@ -21,7 +21,9 @@ Map the user's arguments (`$ARGUMENTS`) to a subcommand:
 - **`all`** — run `... all`, which mirrors every missing session back to its
   original project directory (backup restore, no remapping).
 
-Existing local transcripts are never overwritten. If configuration is
+An existing local transcript is only replaced when the server holds a
+newer save of it; the CLI then keeps the previous copy as a `.bak` and
+says so — relay that line. If configuration is
 missing, point the user to `~/.config/session-vault/config` (needs
 `SESSION_VAULT_URL` and `SESSION_VAULT_TOKEN`). If a restore fails because
 the session is encrypted and no key is present, tell the user to copy

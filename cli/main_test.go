@@ -662,3 +662,87 @@ func TestSessionByIDSearchesProjects(t *testing.T) {
 		t.Fatal("want an error for an unknown id")
 	}
 }
+
+// encryptedBlob returns age(gzip(content)) for the key at keyPath.
+func encryptedBlob(t *testing.T, keyPath, content string) []byte {
+	t.Helper()
+	recs, err := config{AgeKey: keyPath}.recipients()
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(t.TempDir(), "s.jsonl")
+	if err := os.WriteFile(src, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r, err := encodeTranscript(src, recs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+func TestDownloadReplacesStaleLocalCopy(t *testing.T) {
+	projects := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", projects)
+	keyPath := newAgeKey(t)
+	cfg := config{AgeKey: keyPath, Token: "tok", URL: blobServer(t, encryptedBlob(t, keyPath, "new")).URL}
+
+	dest := filepath.Join(projects, "projects", "proj", "abc.jsonl")
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dest, []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(dest, old, old); err != nil {
+		t.Fatal(err)
+	}
+
+	meta := Meta{SessionID: "abc", Encrypted: "age+gzip", UploadedAt: time.Now().Add(-time.Minute)}
+	if err := download(cfg, meta, "proj"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(dest); string(got) != "new" {
+		t.Fatalf("stale copy not replaced: %q", got)
+	}
+	backups, _ := filepath.Glob(dest + ".*.bak")
+	if len(backups) != 1 {
+		t.Fatalf("want one backup, got %v", backups)
+	}
+	if got, _ := os.ReadFile(backups[0]); string(got) != "old" {
+		t.Fatalf("backup content %q", got)
+	}
+
+	// The fresh copy is now newer than the upload: a second fetch skips.
+	if err := download(cfg, meta, "proj"); err != nil {
+		t.Fatal(err)
+	}
+	if backups, _ := filepath.Glob(dest + ".*.bak"); len(backups) != 1 {
+		t.Fatalf("second fetch should skip, backups: %v", backups)
+	}
+}
+
+func TestDownloadKeepsNewerLocalCopy(t *testing.T) {
+	projects := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", projects)
+	cfg := config{URL: "http://unused", Token: "tok"}
+	dest := filepath.Join(projects, "projects", "proj", "abc.jsonl")
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dest, []byte("local progress"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	meta := Meta{SessionID: "abc", Encrypted: "age+gzip", UploadedAt: time.Now().Add(-time.Hour)}
+	if err := download(cfg, meta, "proj"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(dest); string(got) != "local progress" {
+		t.Fatalf("newer local copy replaced: %q", got)
+	}
+}

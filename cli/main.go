@@ -828,10 +828,19 @@ func download(cfg config, meta Meta, destProject string) error {
 	}
 	destDir := filepath.Join(claudeProjectsDir(), destProject)
 	dest := filepath.Join(destDir, id+".jsonl")
-	if _, err := os.Stat(dest); err == nil {
-		fmt.Printf("skip    %s (already present at %s)\n", id, dest)
-		slog.Debug("download", "session_id", id, "skip", true, "dest", dest)
-		return nil
+	// An existing local transcript is kept unless the server holds a
+	// strictly newer save (e.g. the session continued on another machine
+	// and was saved there). Local writes after our last fetch or save bump
+	// the mtime past uploaded_at, so unsaved local progress is never
+	// replaced; a replaced copy is kept next to it as a .bak.
+	replace := false
+	if info, err := os.Stat(dest); err == nil {
+		if meta.UploadedAt.IsZero() || !meta.UploadedAt.After(info.ModTime()) {
+			fmt.Printf("skip    %s (local copy at %s is up to date)\n", id, dest)
+			slog.Debug("download", "session_id", id, "skip", true, "dest", dest)
+			return nil
+		}
+		replace = true
 	}
 	switch meta.Encrypted {
 	case "age+gzip":
@@ -892,6 +901,13 @@ func download(cfg config, meta Meta, destProject string) error {
 	}
 	if err := tmp.Close(); err != nil {
 		return err
+	}
+	if replace {
+		backup := dest + "." + time.Now().UTC().Format("20060102T150405Z") + ".bak"
+		if err := os.Rename(dest, backup); err != nil {
+			return fmt.Errorf("backing up the local copy: %w", err)
+		}
+		fmt.Printf("updated %s: the server copy is newer; previous local copy kept at %s\n", id, backup)
 	}
 	if err := os.Rename(tmp.Name(), dest); err != nil {
 		return err

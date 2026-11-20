@@ -98,7 +98,11 @@ session there. (The session's *history* still references paths from the
 original machine; the CLI prints a note reminding you of where it was
 recorded.)
 
-Restores never overwrite an existing local transcript. Re-saving a labeled
+Restores keep an existing local transcript unless the server holds a
+newer save of it (e.g. you continued the session on another machine and
+saved it there); the replaced local copy is kept next to it as
+`<id>.jsonl.<timestamp>.bak`. Local progress made after your last fetch or
+save is never replaced. Re-saving a labeled
 session without repeating the name keeps its label. When you save without a
 name, the CLI uses the session title Claude Code generates (the one shown in
 the terminal title) — e.g. `Apple access from Teams thread` becomes
