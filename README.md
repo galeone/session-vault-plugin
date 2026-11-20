@@ -48,9 +48,9 @@ The CLI logs structured text (slog) to stderr and to a daily file named
 warn|error` (default `info`) sets the level; command output on stdout is
 never affected.
 
-### End-to-end encryption (recommended)
+### End-to-end encryption
 
-Every upload is end-to-end encrypted: on the first `/session-vault:save`
+Every upload is end-to-end encrypted, always: on the first `/session-vault:save`
 the client generates an age identity for you (the binary has age built in,
 no separate install needed) and stores it at
 `~/.config/session-vault/age.key`. You can also create it ahead of time with
@@ -111,8 +111,8 @@ automatically.
   `{session_id, transcript_path, cwd}` to
   `~/.local/state/session-vault/by-cwd/<cwd-slug>.json`.
 - `/session-vault:save` reads that state (falling back to the most recently modified
-  transcript for the project) and uploads gzip-compressed, age-encrypted when
-  a key is configured.
+  transcript for the project) and uploads it gzip-compressed and
+  age-encrypted (a key is generated on the first save if none exists).
 - Transcripts are treated as opaque blobs: their JSONL format is internal to
   Claude Code and changes between versions, so nothing here parses them.
 
@@ -136,8 +136,8 @@ the binary on `PATH`. Cut release artifacts for all platforms with
 ## Security notes
 
 - Transcripts can contain source code, secrets pasted into the chat, and
-  command output. Enable end-to-end encryption (above) so the server only
-  stores ciphertext, and always use HTTPS.
+  command output. Uploads are always end-to-end encrypted (above), so the
+  server only stores ciphertext; still, always use HTTPS.
 - The token is sent as a `Bearer` header; keep the config file and age key
   private (`chmod 600`).
 

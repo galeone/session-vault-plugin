@@ -420,13 +420,10 @@ func save(name string) error {
 	if name != "" {
 		req.Header.Set("X-Name", name)
 	}
-	if recipients != nil {
-		req.Header.Set("Content-Type", "application/octet-stream")
-		req.Header.Set("X-Encrypted", "age+gzip")
-	} else {
-		req.Header.Set("Content-Type", "application/x-ndjson")
-		req.Header.Set("Content-Encoding", "gzip")
-	}
+	// Every upload is age(gzip(transcript)): a key is generated above when
+	// none exists, so there is no plaintext upload path.
+	req.Header.Set("Content-Type", "application/octet-stream")
+	req.Header.Set("X-Encrypted", "age+gzip")
 
 	var meta Meta
 	if err := doJSON(req, &meta); err != nil {
@@ -434,7 +431,9 @@ func save(name string) error {
 	}
 	enc := "encrypted"
 	if meta.Encrypted == "" {
-		enc = "UNENCRYPTED"
+		// The server did not record the scheme we declared: still
+		// ciphertext on disk, but say so rather than claim otherwise.
+		enc = "encrypted, scheme not recorded by the server"
 	}
 	label := ""
 	if meta.Name != "" {
@@ -563,7 +562,6 @@ func get(key string) error {
 	return nil
 }
 
-// resolve matches key against session ids first, then against user-chosen
 // sessionTitle returns the AI-generated title Claude Code writes into the
 // transcript ("type":"ai-title" lines, repeated as the title is
 // regenerated); the last occurrence wins. Empty when the transcript has
@@ -613,6 +611,7 @@ func slugify(s string) string {
 	return out
 }
 
+// resolve matches key against session ids first, then against user-chosen
 // names. An ambiguous name (reused across saves) is an error listing the ids.
 func resolve(cfg config, key string) (Meta, error) {
 	metas, err := listSessions(cfg)
