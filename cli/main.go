@@ -10,7 +10,8 @@
 //
 //	session-vault keygen            generate the age identity (once per user)
 //	session-vault track             SessionStart hook: record session info from stdin JSON
-//	session-vault save [name]       upload the current project's session (auto-named from the session title)
+//	session-vault save [--session <id>] [name]
+//	                                upload the current session (auto-named from the session title)
 //	session-vault list              list sessions stored on the server
 //	session-vault get <session-id>  download one session into ~/.claude/projects/
 //	session-vault all               download every session missing locally
@@ -87,11 +88,21 @@ func main() {
 	case "track":
 		err = track()
 	case "save":
-		name := ""
-		if len(os.Args) > 2 {
-			name = os.Args[2]
+		var name, sessionID string
+		args := os.Args[2:]
+		for len(args) > 0 {
+			switch {
+			case args[0] == "--session" && len(args) > 1:
+				sessionID, args = args[1], args[2:]
+			case strings.HasPrefix(args[0], "--session="):
+				sessionID, args = strings.TrimPrefix(args[0], "--session="), args[1:]
+			case name == "" && !strings.HasPrefix(args[0], "--"):
+				name, args = args[0], args[1:]
+			default:
+				usage()
+			}
 		}
-		err = save(name)
+		err = save(name, sessionID)
 	case "list":
 		err = list()
 	case "get":
@@ -124,7 +135,10 @@ func usage() {
 
   keygen            generate the age identity used for end-to-end encryption
   track             (hook) record the current session from stdin JSON
-  save [name]       upload the current project's session, optionally labeled
+  save [--session <id>] [name]
+                    upload the current session, optionally labeled; --session
+                    names it exactly (the skill passes Claude Code's id),
+                    otherwise it is resolved from the working directory
   list              list sessions stored on the server
   get <id-or-name>  restore one session into the CURRENT project directory,
                     so it is resumable from here with claude --resume
@@ -349,6 +363,39 @@ func trackFrom(r io.Reader) error {
 	return nil
 }
 
+// sessionByID locates the transcript of a known session id, wherever its
+// project lives: first via the state the track hook recorded (which also
+// knows the session's cwd), then by searching every project directory.
+// It is what makes save independent of the shell's current directory,
+// which drifts when Claude cd's into a subdirectory.
+func sessionByID(id string) (transcript, project, cwd string, err error) {
+	states, _ := filepath.Glob(filepath.Join(stateDir(), "by-cwd", "*.json"))
+	for _, path := range states {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var st struct {
+			SessionID      string `json:"session_id"`
+			TranscriptPath string `json:"transcript_path"`
+			Cwd            string `json:"cwd"`
+		}
+		if json.Unmarshal(data, &st) != nil || st.SessionID != id || st.TranscriptPath == "" || st.Cwd == "" {
+			continue
+		}
+		if _, err := os.Stat(st.TranscriptPath); err == nil {
+			return st.TranscriptPath, projectSlug(st.Cwd), st.Cwd, nil
+		}
+	}
+	matches, _ := filepath.Glob(filepath.Join(claudeProjectsDir(), "*", id+".jsonl"))
+	if len(matches) > 0 {
+		// The project slug is the directory name; the original cwd is not
+		// recoverable from it, so the caller keeps its own.
+		return matches[0], filepath.Base(filepath.Dir(matches[0])), "", nil
+	}
+	return "", "", "", fmt.Errorf("no transcript found for session %s", id)
+}
+
 // currentSession resolves the session id and transcript path for cwd: first
 // from the state file written by the track hook, then by falling back to the
 // most recently modified transcript for the project.
@@ -389,7 +436,7 @@ var validSessionName = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 // enforces on upload).
 var validPathName = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
-func save(name string) error {
+func save(name, sessionID string) error {
 	if name != "" && !validSessionName.MatchString(name) {
 		return fmt.Errorf("invalid name %q: use letters, digits, '-' and '_' (max 64 chars)", name)
 	}
@@ -401,9 +448,25 @@ func save(name string) error {
 	if err != nil {
 		return err
 	}
-	id, transcript, err := currentSession(cwd)
-	if err != nil {
-		return err
+	var id, transcript, project string
+	// An empty or malformed --session (e.g. an older Claude Code that does
+	// not substitute ${CLAUDE_SESSION_ID}) falls back to the cwd lookup.
+	if validPathName.MatchString(sessionID) {
+		var sessCwd string
+		if transcript, project, sessCwd, err = sessionByID(sessionID); err == nil {
+			id = sessionID
+			if sessCwd != "" {
+				cwd = sessCwd
+			}
+		} else {
+			slog.Debug("session lookup by id failed, falling back to cwd", "session_id", sessionID, "error", err)
+		}
+	}
+	if transcript == "" {
+		if id, transcript, err = currentSession(cwd); err != nil {
+			return err
+		}
+		project = projectSlug(cwd)
 	}
 	if name == "" {
 		if title := sessionTitle(transcript); title != "" {
@@ -439,7 +502,7 @@ func save(name string) error {
 	}
 	req.Header.Set("Authorization", "Bearer "+cfg.Token)
 	req.Header.Set("X-Session-Id", id)
-	req.Header.Set("X-Project", projectSlug(cwd))
+	req.Header.Set("X-Project", project)
 	req.Header.Set("X-Cwd", cwd)
 	if name != "" {
 		req.Header.Set("X-Name", name)

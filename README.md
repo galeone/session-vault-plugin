@@ -115,8 +115,12 @@ automatically.
   ships a `SessionStart` hook that runs `session-vault track`, recording
   `{session_id, transcript_path, cwd}` to
   `~/.local/state/session-vault/by-cwd/<cwd-slug>.json`.
-- `/session-vault:save` reads that state (falling back to the most recently modified
-  transcript for the project) and uploads it gzip-compressed and
+- `/session-vault:save` passes Claude Code's own session id
+  (`${CLAUDE_SESSION_ID}`) to the CLI, which finds that session's transcript
+  through the recorded state or by searching the project directories, so
+  it works even after the shell has changed directory. Without an id
+  (older Claude Code) it reads the state for the current directory
+  (falling back to the most recently modified transcript for the project) and uploads it gzip-compressed and
   age-encrypted (a key is generated on the first save if none exists).
 - Transcripts are treated as opaque blobs: their JSONL format is internal to
   Claude Code and changes between versions, so nothing here parses them.

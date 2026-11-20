@@ -614,3 +614,51 @@ func TestDownloadDecryptsAge(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+func TestSessionByIDFromState(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	transcript := filepath.Join(t.TempDir(), "sid1.jsonl")
+	if err := os.WriteFile(transcript, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	payload := fmt.Sprintf(`{"session_id":"sid1","transcript_path":%q,"cwd":"/work/repo"}`, transcript)
+	if err := trackFrom(strings.NewReader(payload)); err != nil {
+		t.Fatal(err)
+	}
+	// A second session in another project must not be picked.
+	if err := trackFrom(strings.NewReader(`{"session_id":"other","transcript_path":"/nope","cwd":"/elsewhere"}`)); err != nil {
+		t.Fatal(err)
+	}
+	got, project, cwd, err := sessionByID("sid1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != transcript || project != "-work-repo" || cwd != "/work/repo" {
+		t.Fatalf("got %q %q %q", got, project, cwd)
+	}
+}
+
+func TestSessionByIDSearchesProjects(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	base := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", base)
+	dir := filepath.Join(base, "projects", "-some-project")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(dir, "sid2.jsonl")
+	if err := os.WriteFile(want, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, project, cwd, err := sessionByID("sid2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want || project != "-some-project" || cwd != "" {
+		t.Fatalf("got %q %q %q", got, project, cwd)
+	}
+	if _, _, _, err := sessionByID("missing"); err == nil {
+		t.Fatal("want an error for an unknown id")
+	}
+}
