@@ -746,3 +746,47 @@ func TestDownloadKeepsNewerLocalCopy(t *testing.T) {
 		t.Fatalf("newer local copy replaced: %q", got)
 	}
 }
+
+// With transcripts of one id in two projects, the most recently written
+// one is the live session, even when the hook state points at the other.
+func TestSessionByIDPrefersNewestTranscript(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	base := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", base)
+	write := func(project string, age time.Duration) string {
+		t.Helper()
+		dir := filepath.Join(base, "projects", project)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		p := filepath.Join(dir, "sid.jsonl")
+		if err := os.WriteFile(p, []byte("{}\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		at := time.Now().Add(-age)
+		if err := os.Chtimes(p, at, at); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	old := write("-work-a", time.Hour)
+	live := write("-work-b", 0)
+	if err := trackFrom(strings.NewReader(fmt.Sprintf(`{"session_id":"sid","transcript_path":%q,"cwd":"/work/a"}`, old))); err != nil {
+		t.Fatal(err)
+	}
+	got, project, cwd, err := sessionByID("sid")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != live || project != "-work-b" || cwd != "" {
+		t.Fatalf("got %q %q %q, want the live transcript in -work-b", got, project, cwd)
+	}
+
+	// Once the hook has tracked the live one too, its cwd is known.
+	if err := trackFrom(strings.NewReader(fmt.Sprintf(`{"session_id":"sid","transcript_path":%q,"cwd":"/work/b"}`, live))); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, cwd, _ := sessionByID("sid"); cwd != "/work/b" {
+		t.Fatalf("cwd = %q, want /work/b", cwd)
+	}
+}

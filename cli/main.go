@@ -364,11 +364,15 @@ func trackFrom(r io.Reader) error {
 }
 
 // sessionByID locates the transcript of a known session id, wherever its
-// project lives: first via the state the track hook recorded (which also
-// knows the session's cwd), then by searching every project directory.
-// It is what makes save independent of the shell's current directory,
-// which drifts when Claude cd's into a subdirectory.
+// project lives. It is what makes save independent of the shell's current
+// directory, which drifts when Claude cd's into a subdirectory.
+//
+// The same id can have transcripts in several projects (a session saved
+// on one machine and restored into another project here, or resumed in a
+// second directory): the most recently written one is the live session.
+// The track hook's state supplies the original cwd for it when known.
 func sessionByID(id string) (transcript, project, cwd string, err error) {
+	cwdOf := map[string]string{}
 	states, _ := filepath.Glob(filepath.Join(stateDir(), "by-cwd", "*.json"))
 	for _, path := range states {
 		data, err := os.ReadFile(path)
@@ -380,20 +384,30 @@ func sessionByID(id string) (transcript, project, cwd string, err error) {
 			TranscriptPath string `json:"transcript_path"`
 			Cwd            string `json:"cwd"`
 		}
-		if json.Unmarshal(data, &st) != nil || st.SessionID != id || st.TranscriptPath == "" || st.Cwd == "" {
-			continue
-		}
-		if _, err := os.Stat(st.TranscriptPath); err == nil {
-			return st.TranscriptPath, projectSlug(st.Cwd), st.Cwd, nil
+		if json.Unmarshal(data, &st) == nil && st.SessionID == id && st.TranscriptPath != "" && st.Cwd != "" {
+			cwdOf[filepath.Clean(st.TranscriptPath)] = st.Cwd
 		}
 	}
-	matches, _ := filepath.Glob(filepath.Join(claudeProjectsDir(), "*", id+".jsonl"))
-	if len(matches) > 0 {
-		// The project slug is the directory name; the original cwd is not
-		// recoverable from it, so the caller keeps its own.
-		return matches[0], filepath.Base(filepath.Dir(matches[0])), "", nil
+	candidates, _ := filepath.Glob(filepath.Join(claudeProjectsDir(), "*", id+".jsonl"))
+	for t := range cwdOf {
+		candidates = append(candidates, t)
 	}
-	return "", "", "", fmt.Errorf("no transcript found for session %s", id)
+	var newestTime time.Time
+	for _, c := range candidates {
+		info, err := os.Stat(c)
+		if err == nil && !info.IsDir() && info.ModTime().After(newestTime) {
+			transcript, newestTime = filepath.Clean(c), info.ModTime()
+		}
+	}
+	if transcript == "" {
+		return "", "", "", fmt.Errorf("no transcript found for session %s", id)
+	}
+	if cwd = cwdOf[transcript]; cwd != "" {
+		return transcript, projectSlug(cwd), cwd, nil
+	}
+	// The project slug is the directory name; the original cwd is not
+	// recoverable from it, so the caller keeps its own.
+	return transcript, filepath.Base(filepath.Dir(transcript)), "", nil
 }
 
 // currentSession resolves the session id and transcript path for cwd: first
