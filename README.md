@@ -61,6 +61,17 @@ every machine that needs to fetch your sessions — **if you lose the key,
 encrypted sessions are unrecoverable**. The key file is compatible with the
 standalone `age` CLI.
 
+### What it runs, sends and fetches
+
+- **Runs:** one bash script and the `session-vault` CLI (downloaded from
+  this repo's GitHub releases with a SHA-256 check when missing); age
+  encryption is built into that binary. Nothing else.
+- **Sends:** the encrypted transcript (`age(gzip(…))` ciphertext) to the
+  server URL you configured, and nothing else. No analytics, no telemetry.
+- **Fetches:** your own saved sessions from that same server.
+- **Reads locally:** transcripts under `~/.claude` and your own key at
+  `~/.config/session-vault/age.key`.
+
 ## Usage
 
 | Command | What it does |
