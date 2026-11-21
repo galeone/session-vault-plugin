@@ -790,3 +790,45 @@ func TestSessionByIDPrefersNewestTranscript(t *testing.T) {
 		t.Fatalf("cwd = %q, want /work/b", cwd)
 	}
 }
+
+// Without hook state (plugin installed mid-session), the original cwd
+// comes from the transcript: the first recorded cwd whose slug is the
+// project directory, not a later subdirectory Claude cd'd into.
+func TestSessionByIDCwdFromTranscript(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	base := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", base)
+	dir := filepath.Join(base, "projects", "-home-u-work")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	huge := strings.Repeat("x", 5*1024*1024) // longer than any Scanner buffer
+	content := `{"type":"mode"}` + "\n" +
+		`{"type":"blob","data":"` + huge + `"}` + "\n" +
+		`{"type":"user","cwd":"/home/u/work/sub"}` + "\n" +
+		`{"type":"user","cwd":"/home/u/work"}` + "\n" +
+		`{"type":"user","cwd":"/home/u/work/other"}` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "sid3.jsonl"), []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, project, cwd, err := sessionByID("sid3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if project != "-home-u-work" || cwd != "/home/u/work" {
+		t.Fatalf("project=%q cwd=%q, want -home-u-work and /home/u/work", project, cwd)
+	}
+}
+
+func TestTranscriptCwdNoMatch(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "s.jsonl")
+	if err := os.WriteFile(path, []byte(`{"cwd":"/elsewhere"}`+"\n"+`{"cwd":"relative/path"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := transcriptCwd(path, "-home-u-work"); got != "" {
+		t.Fatalf("transcriptCwd = %q, want empty", got)
+	}
+	if got := transcriptCwd(filepath.Join(t.TempDir(), "missing.jsonl"), "-x"); got != "" {
+		t.Fatalf("transcriptCwd(missing) = %q, want empty", got)
+	}
+}

@@ -27,6 +27,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"compress/gzip"
 	"encoding/json"
 	"fmt"
@@ -405,9 +406,43 @@ func sessionByID(id string) (transcript, project, cwd string, err error) {
 	if cwd = cwdOf[transcript]; cwd != "" {
 		return transcript, projectSlug(cwd), cwd, nil
 	}
-	// The project slug is the directory name; the original cwd is not
-	// recoverable from it, so the caller keeps its own.
-	return transcript, filepath.Base(filepath.Dir(transcript)), "", nil
+	// No hook state (e.g. the plugin was installed mid-session): the
+	// transcript itself records the cwd of every entry. The project slug is
+	// the directory name; when no recorded cwd maps to it, the caller keeps
+	// its own.
+	project = filepath.Base(filepath.Dir(transcript))
+	return transcript, project, transcriptCwd(transcript, project), nil
+}
+
+// transcriptCwd returns the directory the session was started in, read
+// from the transcript: the first "cwd" recorded in it whose slug is the
+// transcript's project directory name. Later entries may carry other
+// directories (Claude cd's into subprojects); the slug match picks the
+// starting one. Empty when none matches or the file is unreadable.
+func transcriptCwd(transcript, project string) string {
+	f, err := os.Open(transcript)
+	if err != nil {
+		return ""
+	}
+	defer func() { _ = f.Close() }()
+	// bufio.Reader, not Scanner: transcript lines (tool output, request
+	// blobs) can exceed any fixed Scanner buffer.
+	r := bufio.NewReader(f)
+	for {
+		line, err := r.ReadBytes('\n')
+		if len(line) > 0 && bytes.Contains(line, []byte(`"cwd"`)) {
+			var entry struct {
+				Cwd string `json:"cwd"`
+			}
+			if json.Unmarshal(line, &entry) == nil && entry.Cwd != "" &&
+				filepath.IsAbs(entry.Cwd) && projectSlug(entry.Cwd) == project {
+				return filepath.Clean(entry.Cwd)
+			}
+		}
+		if err != nil {
+			return ""
+		}
+	}
 }
 
 // currentSession resolves the session id and transcript path for cwd: first
