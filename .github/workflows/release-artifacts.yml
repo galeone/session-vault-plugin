@@ -98,7 +98,9 @@ jobs:
 
   # release-please (release-type: simple) bumps version.txt + CHANGELOG but
   # does not know about our plugin manifest or the bootstrap script, so this
-  # job keeps those in lockstep with the tag. It pushes straight to main.
+  # job keeps those in lockstep with the tag: the version, and the SHA-256 of
+  # the binaries just built, which the bootstrap script verifies downloads
+  # against. It pushes straight to main.
   sync-version:
     needs: [detect, build]
     if: needs.detect.outputs.tag != ''
@@ -107,6 +109,10 @@ jobs:
       - uses: actions/checkout@v7
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist/
       - name: Sync version strings to ${{ needs.detect.outputs.tag }}
         run: |
           new="${{ needs.detect.outputs.tag }}"
@@ -117,6 +123,15 @@ jobs:
           script="plugins/session-vault/scripts/session-vault.sh"
           sed -i "s/^VERSION=.*$/VERSION=\"$new\"/" "$script"
           sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$new\"/" "$plugin"
+          # Pin the checksums of the binaries this release published.
+          test -s dist/checksums.txt
+          awk -v sums="$(cat dist/checksums.txt)" '
+            /^# BEGIN CHECKSUMS$/ { print; print "CHECKSUMS=\""; print sums; print "\""; skip = 1; next }
+            /^# END CHECKSUMS$/   { skip = 0 }
+            !skip
+          ' "$script" > "$script.new"
+          grep -q "^# END CHECKSUMS$" "$script.new"
+          cat "$script.new" > "$script" && rm "$script.new"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add "$script" "$plugin"

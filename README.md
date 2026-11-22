@@ -70,10 +70,14 @@ they are used as file names.
 ### What it runs, sends and fetches
 
 - **Runs:** one bash script and the `session-vault` CLI (downloaded from
-  this repo's GitHub releases with a SHA-256 check when missing); age
-  encryption is built into that binary. Nothing else.
-- **Sends:** the encrypted transcript (`age(gzip(…))` ciphertext) to the
-  server URL you configured, and nothing else. No analytics, no telemetry.
+  this repo's GitHub releases when missing, and run only if its SHA-256
+  matches the checksum pinned in the script); age encryption is built into
+  that binary. Nothing else.
+- **Sends:** to the server URL you configured, and only there: the
+  encrypted transcript (`age(gzip(…))` ciphertext), plus in clear the
+  session id, project name, original working directory and optional name
+  the server needs to list and restore it, and your token. No analytics,
+  no telemetry.
 - **Fetches:** your own saved sessions from that same server.
 - **Reads locally:** transcripts under `~/.claude` and your own key at
   `~/.config/session-vault/age.key`.
