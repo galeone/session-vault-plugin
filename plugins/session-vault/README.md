@@ -39,7 +39,8 @@ your own, self-hosted from
 Install it in Claude Code:
 
 ```
-/plugin install session-vault --marketplace galeone/session-vault-plugin
+/plugin marketplace add galeone/session-vault-plugin
+/plugin install session-vault@galeone-plugins
 ```
 
 Then:
