@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.5.0](https://github.com/galeone/session-vault-plugin/compare/v1.4.1...v1.5.0) (2026-11-22)
+
+
+### Features
+
+* get ready for Anthropic's plugin directory ([#15](https://github.com/galeone/session-vault-plugin/issues/15)) ([7251238](https://github.com/galeone/session-vault-plugin/commit/725123859921258f596638950435ca0b1e665f78))
+
+
+### Bug Fixes
+
+* record where the session started when the track hook never ran ([#13](https://github.com/galeone/session-vault-plugin/issues/13)) ([1f8a97a](https://github.com/galeone/session-vault-plugin/commit/1f8a97a943ebe635f78f16f2a74ab59598add6de))
+
 ## [1.4.1](https://github.com/galeone/session-vault-plugin/compare/v1.4.0...v1.4.1) (2026-11-20)
 
 
