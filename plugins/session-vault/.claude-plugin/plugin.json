@@ -7,11 +7,23 @@
     "name": "Paolo Galeone",
     "email": "nessuno@nerdz.eu"
   },
-  "homepage": "https://github.com/galeone/session-vault-plugin",
+  "homepage": "https://session-vault.dev",
   "repository": "https://github.com/galeone/session-vault-plugin",
   "license": "MIT",
-  "keywords": ["session", "transcript", "backup", "sync"],
+  "keywords": [
+    "session",
+    "transcript",
+    "backup",
+    "sync"
+  ],
   "icon": "./icon.png",
   "documentationUrl": "https://github.com/galeone/session-vault-plugin#readme",
-  "supportUrl": "https://github.com/galeone/session-vault-plugin/issues"
+  "supportUrl": "https://github.com/galeone/session-vault-plugin/issues",
+  "network": {
+    "hosts": [
+      "session-vault.dev",
+      "github.com",
+      "release-assets.githubusercontent.com"
+    ]
+  }
 }
