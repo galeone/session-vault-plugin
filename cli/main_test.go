@@ -384,8 +384,12 @@ func TestDownloadSkipPresent(t *testing.T) {
 	if err := os.WriteFile(dest, []byte("existing"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := download(cfg, meta, "proj"); err != nil {
+	written, err := download(cfg, meta, "proj")
+	if err != nil {
 		t.Fatal(err)
+	}
+	if written {
+		t.Error("download reported a write for a skipped session")
 	}
 	got, _ := os.ReadFile(dest)
 	if string(got) != "existing" {
@@ -564,7 +568,7 @@ func TestDownloadRejectsUnsafeServerPaths(t *testing.T) {
 		{"a/b", "proj"},
 	}
 	for _, c := range cases {
-		err := download(cfg, Meta{SessionID: c.id, Encrypted: "age+gzip"}, c.project)
+		_, err := download(cfg, Meta{SessionID: c.id, Encrypted: "age+gzip"}, c.project)
 		if err == nil || !strings.Contains(err.Error(), "invalid") {
 			t.Errorf("download(id=%q, project=%q) = %v, want invalid error", c.id, c.project, err)
 		}
@@ -575,7 +579,7 @@ func TestDownloadRefusesPlaintext(t *testing.T) {
 	projects := t.TempDir()
 	t.Setenv("CLAUDE_CONFIG_DIR", projects)
 	cfg := config{URL: blobServer(t, []byte(`{"planted":true}`)).URL, Token: "tok"}
-	err := download(cfg, Meta{SessionID: "abc"}, "proj")
+	_, err := download(cfg, Meta{SessionID: "abc"}, "proj")
 	if err == nil || !strings.Contains(err.Error(), "not end-to-end encrypted") {
 		t.Fatalf("want plaintext refusal, got %v", err)
 	}
@@ -606,8 +610,12 @@ func TestDownloadDecryptsAge(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg.URL = blobServer(t, blob).URL
-	if err := download(cfg, Meta{SessionID: "abc", Encrypted: "age+gzip"}, "proj"); err != nil {
+	written, err := download(cfg, Meta{SessionID: "abc", Encrypted: "age+gzip"}, "proj")
+	if err != nil {
 		t.Fatal(err)
+	}
+	if !written {
+		t.Error("download did not report the write")
 	}
 	got, _ := os.ReadFile(filepath.Join(projects, "projects", "proj", "abc.jsonl"))
 	if string(got) != `{"a":1}` {
@@ -704,7 +712,7 @@ func TestDownloadReplacesStaleLocalCopy(t *testing.T) {
 	}
 
 	meta := Meta{SessionID: "abc", Encrypted: "age+gzip", UploadedAt: time.Now().Add(-time.Minute)}
-	if err := download(cfg, meta, "proj"); err != nil {
+	if _, err := download(cfg, meta, "proj"); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := os.ReadFile(dest); string(got) != "new" {
@@ -719,7 +727,7 @@ func TestDownloadReplacesStaleLocalCopy(t *testing.T) {
 	}
 
 	// The fresh copy is now newer than the upload: a second fetch skips.
-	if err := download(cfg, meta, "proj"); err != nil {
+	if _, err := download(cfg, meta, "proj"); err != nil {
 		t.Fatal(err)
 	}
 	if backups, _ := filepath.Glob(dest + ".*.bak"); len(backups) != 1 {
@@ -739,7 +747,7 @@ func TestDownloadKeepsNewerLocalCopy(t *testing.T) {
 		t.Fatal(err)
 	}
 	meta := Meta{SessionID: "abc", Encrypted: "age+gzip", UploadedAt: time.Now().Add(-time.Hour)}
-	if err := download(cfg, meta, "proj"); err != nil {
+	if _, err := download(cfg, meta, "proj"); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := os.ReadFile(dest); string(got) != "local progress" {

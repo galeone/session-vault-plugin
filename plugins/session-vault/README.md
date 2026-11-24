@@ -87,6 +87,10 @@ Then:
 - **Stores locally**: your config and encryption key in
   `~/.config/session-vault/`, restored transcripts in `~/.claude/projects/`,
   logs in `~/.local/state/session-vault/logs/` (deleted after 21 days).
+  Restored transcripts are plain text, like the ones Claude Code writes,
+  and can contain secrets you pasted or that commands printed (tokens,
+  `.env` contents): restoring a session copies those to the machine you
+  fetch on, and the CLI prints a warning when it does.
 
 ## Privacy and support
 
