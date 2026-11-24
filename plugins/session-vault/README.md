@@ -3,9 +3,11 @@
 Back up your Claude Code sessions and use them on any machine. Claude Code
 keeps each conversation in `~/.claude`, only on the machine where it
 happened, and deletes old transcripts after a while. This plugin saves the
-sessions you want to keep to a Session Vault server, encrypted on your
-machine first, and restores them on any of your machines so you can carry
-on where you left off.
+sessions to a Session Vault server, encrypted on your machine first, and
+restores them on any of your machines so you can carry on where you left
+off. Every session is saved automatically when it ends, so one you forgot
+to save isn't lost when Claude Code cleans up; you can turn that off with
+`/session-vault:autosave off`.
 
 The server can be the hosted service at
 [session-vault.dev](https://session-vault.dev) (free plan: 10 sessions) or
@@ -21,6 +23,32 @@ your own, self-hosted from
 | `/session-vault:fetch [name-or-id \| all]` | Restores a session into the current project (or all of them) |
 | `/session-vault:clean <name-or-id>` | Deletes a saved session from the server, after asking |
 | `/session-vault:rotate-key` | Re-encrypts every saved session to a new key and replaces your key, after asking |
+| `/session-vault:autosave [on \| off]` | Shows, or turns on or off, saving every session automatically when it ends (on by default) |
+
+## Automatic saving
+
+When a session ends (you exit, `/clear`, or switch with `/resume`), the
+plugin saves it in the background, exactly as `/session-vault:save` would
+without a name: it gets the session title as its label, or keeps the name
+you gave it earlier. It runs after Claude Code has exited, never asks or
+prints anything, and logs to `~/.local/state/session-vault/logs/`. It skips:
+
+- sessions without a reply from Claude (opened and closed, or only a slash
+  command), so they don't take up room in your plan;
+- sessions that haven't changed since they were last saved;
+- sessions the server holds a newer save of, for example one you
+  continued and saved on another machine: autosave never replaces it with
+  this machine's older copy;
+- everything, on a machine without your encryption key: autosave never
+  creates one. Run `/session-vault:save` once, or copy `age.key` there.
+
+On a plan with a session limit, autosave stops adding new sessions once
+you reach it (re-saving the ones you have keeps working), and the next
+session you start opens with a notice saying how many weren't saved and
+what to do about it. Turn it off
+with `/session-vault:autosave off`, which writes
+`SESSION_VAULT_AUTOSAVE=off` to `~/.config/session-vault/config`; the
+`SESSION_VAULT_AUTOSAVE` environment variable overrides the file.
 
 ## Examples
 
@@ -75,7 +103,11 @@ Then:
   session id, transcript path and working directory to
   `~/.local/state/session-vault/by-cwd/` so that `save` knows which
   transcript is the current one. It sends nothing over the network.
-- **Sends**, only when you run a command, and only to the server in your
+- **A `SessionEnd` hook** runs `session-vault session-end`, which starts
+  the automatic save described above in the background, unless autosave is
+  off.
+- **Sends**, when you run a command or a session ends with autosave on,
+  and only to the server in your
   config: the transcript, together with the transcripts of the subagents
   it ran (`<session-id>/subagents/`), gzip-compressed and encrypted with
   [age](https://age-encryption.org) on your machine (the server can't read

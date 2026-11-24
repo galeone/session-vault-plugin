@@ -11,6 +11,8 @@
 //
 //	session-vault keygen            generate the age identity (once per user)
 //	session-vault track             SessionStart hook: record session info from stdin JSON
+//	session-vault session-end       SessionEnd hook: auto-save the session in the background
+//	session-vault autosave [on|off] show or change automatic saving (on by default)
 //	session-vault save [--session <id>] [name]
 //	                                upload the current session (auto-named from the session title)
 //	session-vault list              list sessions stored on the server
@@ -128,6 +130,22 @@ func main() {
 			os.Exit(2)
 		}
 		err = rotateKey()
+	case "session-end":
+		err = sessionEnd(os.Stdin)
+	case "autosave-run":
+		if len(os.Args) != 3 {
+			usage()
+		}
+		err = autosaveRun(os.Args[2])
+	case "autosave":
+		switch len(os.Args) {
+		case 2:
+			err = autosaveStatus()
+		case 3:
+			err = setAutosave(os.Args[2])
+		default:
+			usage()
+		}
 	case "version":
 		fmt.Println("session-vault", version)
 	default:
@@ -144,6 +162,10 @@ func usage() {
 
   keygen            generate the age identity used for end-to-end encryption
   track             (hook) record the current session from stdin JSON
+  session-end       (hook) auto-save the session that just ended, in the
+                    background, unless autosave is off
+  autosave [on|off] show or change whether sessions are saved automatically
+                    when they end (on by default)
   save [--session <id>] [name]
                     upload the current session, optionally labeled; --session
                     names it exactly (the skill passes Claude Code's id),
@@ -169,6 +191,15 @@ func homeDir() string {
 		return "."
 	}
 	return home
+}
+
+// configPath is the config file: $SESSION_VAULT_CONFIG, or config in
+// configDir().
+func configPath() string {
+	if p := os.Getenv("SESSION_VAULT_CONFIG"); p != "" {
+		return p
+	}
+	return filepath.Join(configDir(), "config")
 }
 
 func configDir() string {
@@ -213,10 +244,7 @@ func loadConfig() (config, error) {
 		Token:  os.Getenv("SESSION_VAULT_TOKEN"),
 		AgeKey: os.Getenv("SESSION_VAULT_AGE_KEY"),
 	}
-	path := os.Getenv("SESSION_VAULT_CONFIG")
-	if path == "" {
-		path = filepath.Join(configDir(), "config")
-	}
+	path := configPath()
 	if data, err := os.ReadFile(path); err == nil {
 		for _, line := range strings.Split(string(data), "\n") {
 			line = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "export "))
@@ -347,7 +375,9 @@ func keygen() error {
 // on stdin. State is keyed by cwd slug so concurrent sessions in different
 // projects don't clobber each other. Best-effort: never fails the hook.
 func track() error {
-	return trackFrom(os.Stdin)
+	err := trackFrom(os.Stdin)
+	printLimitNotice(os.Stdout)
+	return err
 }
 
 // trackFrom is the testable core of track: it reads the hook payload from r

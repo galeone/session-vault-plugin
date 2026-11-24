@@ -94,6 +94,7 @@ they are used as file names.
 | `/session-vault:fetch all` | Mirrors every missing session back to its original project directory |
 | `/session-vault:clean <name-or-id>` | Deletes a session from the server (asks for confirmation first; local files are untouched) |
 | `/session-vault:rotate-key` | Re-encrypts every saved session to a new age key and replaces your key (asks for confirmation first; copy the new key to your other machines afterwards) |
+| `/session-vault:autosave [on\|off]` | Shows or changes automatic saving: on by default, every session is saved in the background when it ends |
 
 The core workflow this enables: work on Linux in `/data/you/repo`,
 `/session-vault:save my-feature`, then on any other machine — different OS,
@@ -132,6 +133,18 @@ automatically.
   (older Claude Code) it reads the state for the current directory
   (falling back to the most recently modified transcript for the project) and uploads it gzip-compressed and
   age-encrypted (a key is generated on the first save if none exists).
+- A `SessionEnd` hook runs `session-vault session-end`. Claude Code gives
+  all SessionEnd hooks 1.5 seconds together, which a plugin can't raise,
+  so the hook only starts `session-vault autosave-run <id>` as a detached
+  process (its own session on Unix, a detached process on Windows) and
+  returns. That process waits 2 seconds for Claude Code to finish writing,
+  then saves the session unless it has no assistant reply, hasn't changed
+  since the server's newest save of it, or there is no age key yet.
+  `SESSION_VAULT_AUTOSAVE=off` (config file or environment) turns it off.
+  When a save is refused with 402 (plan limit reached), the background
+  process records it in `~/.local/state/session-vault/`, and the next
+  `SessionStart` hook prints it once as `{"systemMessage": ...}`, which
+  Claude Code shows to the user.
 - Subagents (Task/Agent tool calls) get their own transcripts in
   `~/.claude/projects/<cwd-slug>/<session-id>/subagents/`. When a session
   has any, `save` uploads them with the main transcript as one encrypted
@@ -175,9 +188,9 @@ the binary on `PATH`. Cut release artifacts for all platforms with
 .claude-plugin/marketplace.json      Marketplace catalog (name: galeone-plugins)
 plugins/session-vault/
 ├── .claude-plugin/plugin.json       Plugin manifest
-├── skills/{save,fetch,list,clean,rotate-key}/SKILL.md
+├── skills/{save,fetch,list,clean,rotate-key,autosave}/SKILL.md
 ├── icon.png                         Directory listing icon
-├── hooks/hooks.json                 SessionStart hook (session-vault track)
+├── hooks/hooks.json                 SessionStart (track) and SessionEnd (session-end) hooks
 └── scripts/session-vault.sh         Binary bootstrap wrapper
 cli/                                 Go source of the session-vault client
 ```

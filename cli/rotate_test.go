@@ -26,6 +26,9 @@ type memVault struct {
 	// plainOnly makes it behave like a server older than the bundle
 	// scheme, refusing anything but age+gzip.
 	plainOnly bool
+	// limit, when set, refuses new session ids past it with 402, like a
+	// hosted plan.
+	limit int
 }
 
 func newMemVault(t *testing.T) (*memVault, *httptest.Server) {
@@ -62,6 +65,11 @@ func newMemVault(t *testing.T) (*memVault, *httptest.Server) {
 		}
 		if enc := r.Header.Get("X-Encrypted"); enc != schemeTranscript && (v.plainOnly || enc != schemeBundle) {
 			http.Error(w, "uploads must be end-to-end encrypted (X-Encrypted: age+gzip)", http.StatusBadRequest)
+			return
+		}
+		if _, exists := v.metas[id]; v.limit > 0 && !exists && len(v.metas) >= v.limit {
+			w.WriteHeader(http.StatusPaymentRequired)
+			_, _ = w.Write([]byte(`{"error":"session limit reached","plan":"free","limit":1,"used":1,"upgrade_url":"https://vault.example/account"}`))
 			return
 		}
 		body, _ := io.ReadAll(r.Body)
