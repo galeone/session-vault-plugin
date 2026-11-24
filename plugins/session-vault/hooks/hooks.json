@@ -1,5 +1,5 @@
 {
-  "description": "Tags the current project as a session-vault session on SessionStart so /session-vault:save knows what to back up",
+  "description": "Records the current session on SessionStart so /session-vault:save knows what to back up, and saves the session in the background on SessionEnd unless autosave is off",
   "hooks": {
     "SessionStart": [
       {
@@ -7,6 +7,16 @@
           {
             "type": "command",
             "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/session-vault.sh\" track 2>/dev/null || true"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/session-vault.sh\" session-end 2>/dev/null || true"
           }
         ]
       }
