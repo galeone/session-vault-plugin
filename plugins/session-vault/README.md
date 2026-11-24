@@ -20,6 +20,7 @@ your own, self-hosted from
 | `/session-vault:list` | Lists your saved sessions |
 | `/session-vault:fetch [name-or-id \| all]` | Restores a session into the current project (or all of them) |
 | `/session-vault:clean <name-or-id>` | Deletes a saved session from the server, after asking |
+| `/session-vault:rotate-key` | Re-encrypts every saved session to a new key and replaces your key, after asking |
 
 ## Examples
 
@@ -91,6 +92,31 @@ Then:
   and can contain secrets you pasted or that commands printed (tokens,
   `.env` contents): restoring a session copies those to the machine you
   fetch on, and the CLI prints a warning when it does.
+
+## Your encryption key
+
+Sessions are encrypted with the age key in `~/.config/session-vault/age.key`,
+created on your first save. It never leaves your machines, so it's also the
+only way to read your sessions.
+
+- **Back it up.** Copy it to every machine you fetch on, and keep one more
+  copy somewhere safe, such as a password manager.
+- **If you lose it, the sessions are gone.** Nobody can decrypt them, the
+  server operator included. You can still list and delete them
+  (`/session-vault:clean`). To start over, move the old key file away: the
+  next save creates a new key, and sessions saved from then on use it.
+- **Rotating it.** If the key may have leaked, or was on a machine you no
+  longer control, run `/session-vault:rotate-key`. It re-encrypts every
+  saved session to a new key, replaces the key file and keeps the old one
+  as `age.key.<time>.old`. Then copy the new key to your other machines:
+  the old one can no longer decrypt anything. Don't save from a machine
+  until it has the new key: its saves would still use the old one. If the
+  rotation stops halfway, run it again and it resumes with the same new
+  key.
+
+Rotation protects the copies on the server from now on. It can't take back
+anything already decrypted with the old key, such as transcripts restored
+on a machine that had it.
 
 ## Privacy and support
 

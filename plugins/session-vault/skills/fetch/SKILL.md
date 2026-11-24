@@ -29,3 +29,5 @@ missing, point the user to `~/.config/session-vault/config` (needs
 `SESSION_VAULT_URL` and `SESSION_VAULT_TOKEN`). If a restore fails because
 the session is encrypted and no key is present, tell the user to copy
 `~/.config/session-vault/age.key` from the machine where it was generated.
+If decryption fails with the wrong key, the key was probably rotated on
+another machine: tell the user to copy the new `age.key` from there.

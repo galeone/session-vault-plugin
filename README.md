@@ -93,6 +93,7 @@ they are used as file names.
 | `/session-vault:fetch <name-or-id>` | Restores that session **into the current project**, ready to resume here |
 | `/session-vault:fetch all` | Mirrors every missing session back to its original project directory |
 | `/session-vault:clean <name-or-id>` | Deletes a session from the server (asks for confirmation first; local files are untouched) |
+| `/session-vault:rotate-key` | Re-encrypts every saved session to a new age key and replaces your key (asks for confirmation first; copy the new key to your other machines afterwards) |
 
 The core workflow this enables: work on Linux in `/data/you/repo`,
 `/session-vault:save my-feature`, then on any other machine — different OS,
@@ -165,7 +166,7 @@ the binary on `PATH`. Cut release artifacts for all platforms with
 .claude-plugin/marketplace.json      Marketplace catalog (name: galeone-plugins)
 plugins/session-vault/
 ├── .claude-plugin/plugin.json       Plugin manifest
-├── skills/{save,fetch,list,clean}/SKILL.md
+├── skills/{save,fetch,list,clean,rotate-key}/SKILL.md
 ├── icon.png                         Directory listing icon
 ├── hooks/hooks.json                 SessionStart hook (session-vault track)
 └── scripts/session-vault.sh         Binary bootstrap wrapper

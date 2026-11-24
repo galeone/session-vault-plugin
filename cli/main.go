@@ -120,6 +120,12 @@ func main() {
 		err = clean(os.Args[2])
 	case "clean-all":
 		err = cleanAll(len(os.Args) > 2 && os.Args[2] == "--yes")
+	case "rotate-key":
+		if len(os.Args) != 3 || os.Args[2] != "--yes" {
+			fmt.Fprintln(os.Stderr, "rotate-key re-encrypts every saved session to a new key; run it with --yes")
+			os.Exit(2)
+		}
+		err = rotateKey()
 	case "version":
 		fmt.Println("session-vault", version)
 	default:
@@ -146,6 +152,9 @@ func usage() {
   all               mirror every missing session to its original project dir
   clean <id-or-name> delete one session from the server (local files untouched)
   clean-all --yes   delete every session from the server (refused without --yes)
+  rotate-key --yes  re-encrypt every saved session to a new age key and replace
+                    the local key (the old one is kept as a backup); copy the
+                    new key to your other machines afterwards
   version           print the version`)
 	os.Exit(2)
 }
@@ -864,6 +873,19 @@ func cleanAll(yes bool) error {
 	return nil
 }
 
+// sameContent reports whether two files hold the same bytes.
+func sameContent(a, b string) (bool, error) {
+	x, err := os.ReadFile(a)
+	if err != nil {
+		return false, err
+	}
+	y, err := os.ReadFile(b)
+	if err != nil {
+		return false, err
+	}
+	return bytes.Equal(x, y), nil
+}
+
 // restoreWarning is printed after a restore wrote at least one transcript.
 // Saving only encrypts what is already on the machine, but a restore writes
 // the plaintext, secrets included, onto a machine that may never have had it.
@@ -939,7 +961,7 @@ func download(cfg config, meta Meta, destProject string) (bool, error) {
 
 	dec, err := age.Decrypt(resp.Body, identities...)
 	if err != nil {
-		return false, fmt.Errorf("decrypting (wrong key?): %w", err)
+		return false, fmt.Errorf("decrypting (wrong key? after a rotate-key, copy the new age.key to this machine): %w", err)
 	}
 	src, err := gzip.NewReader(dec)
 	if err != nil {
@@ -961,6 +983,22 @@ func download(cfg config, meta Meta, destProject string) (bool, error) {
 		return false, err
 	}
 	if replace {
+		// A re-upload with the same content (rotate-key re-encrypts every
+		// session, which bumps uploaded_at) must not churn .bak copies:
+		// keep the local file, and mark it current so the next fetch skips.
+		same, err := sameContent(tmp.Name(), dest)
+		if err != nil {
+			return false, err
+		}
+		if same {
+			now := time.Now()
+			if err := os.Chtimes(dest, now, now); err != nil {
+				return false, err
+			}
+			fmt.Printf("skip    %s (local copy at %s is up to date)\n", id, dest)
+			slog.Debug("download", "session_id", id, "skip", true, "same_content", true, "dest", dest)
+			return false, nil
+		}
 		backup := dest + "." + time.Now().UTC().Format("20060102T150405Z") + ".bak"
 		if err := os.Rename(dest, backup); err != nil {
 			return false, fmt.Errorf("backing up the local copy: %w", err)
