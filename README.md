@@ -141,6 +141,10 @@ automatically.
   then saves the session unless it has no assistant reply, hasn't changed
   since the server's newest save of it, or there is no age key yet.
   `SESSION_VAULT_AUTOSAVE=off` (config file or environment) turns it off.
+  When a save is refused with 402 (plan limit reached), the background
+  process records it in `~/.local/state/session-vault/`, and the next
+  `SessionStart` hook prints it once as `{"systemMessage": ...}`, which
+  Claude Code shows to the user.
 - Subagents (Task/Agent tool calls) get their own transcripts in
   `~/.claude/projects/<cwd-slug>/<session-id>/subagents/`. When a session
   has any, `save` uploads them with the main transcript as one encrypted

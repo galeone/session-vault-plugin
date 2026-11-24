@@ -43,7 +43,9 @@ prints anything, and logs to `~/.local/state/session-vault/logs/`. It skips:
   creates one. Run `/session-vault:save` once, or copy `age.key` there.
 
 On a plan with a session limit, autosave stops adding new sessions once
-you reach it (re-saving the ones you have keeps working). Turn it off
+you reach it (re-saving the ones you have keeps working), and the next
+session you start opens with a notice saying how many weren't saved and
+what to do about it. Turn it off
 with `/session-vault:autosave off`, which writes
 `SESSION_VAULT_AUTOSAVE=off` to `~/.config/session-vault/config`; the
 `SESSION_VAULT_AUTOSAVE` environment variable overrides the file.

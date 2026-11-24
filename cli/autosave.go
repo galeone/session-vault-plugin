@@ -4,9 +4,11 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -169,6 +171,9 @@ func autosaveRun(id string) error {
 	}
 	if err := save("", id); err != nil {
 		slog.Error("autosave failed", "session_id", id, "error", err)
+		if limit, ok := sessionLimitError(err); ok {
+			recordLimitNotice(limit)
+		}
 		return err
 	}
 	slog.Info("autosave: saved", "session_id", id)
@@ -318,4 +323,93 @@ func writeConfigFile(path string, data []byte) error {
 		return err
 	}
 	return os.Rename(tmp.Name(), path)
+}
+
+// limitReached is the server's 402 answer when a plan's session limit is
+// reached.
+type limitReached struct {
+	Plan       string `json:"plan"`
+	Limit      int    `json:"limit"`
+	UpgradeURL string `json:"upgrade_url"`
+}
+
+func sessionLimitError(err error) (limitReached, bool) {
+	var se *statusError
+	if !errors.As(err, &se) || se.code != http.StatusPaymentRequired {
+		return limitReached{}, false
+	}
+	var l limitReached
+	_ = json.Unmarshal([]byte(se.body), &l) // best effort: the notice works without it
+	return l, true
+}
+
+// The limit notice: a background save can't show anything, so a session
+// it couldn't save because of the plan's limit is recorded here, and the
+// next SessionStart hook (track) shows it to the user once.
+type limitNotice struct {
+	limitReached
+	Unsaved int `json:"unsaved"`
+}
+
+func limitNoticePath() string {
+	return filepath.Join(stateDir(), "autosave-limit-notice.json")
+}
+
+// recordLimitNotice adds one unsaved session to the pending notice.
+func recordLimitNotice(l limitReached) {
+	var n limitNotice
+	if data, err := os.ReadFile(limitNoticePath()); err == nil {
+		_ = json.Unmarshal(data, &n)
+	}
+	n.limitReached = l
+	n.Unsaved++
+	data, err := json.Marshal(n)
+	if err != nil {
+		return
+	}
+	if err := os.MkdirAll(stateDir(), 0o700); err != nil {
+		return
+	}
+	if err := os.WriteFile(limitNoticePath(), data, 0o600); err != nil {
+		slog.Error("autosave: recording the limit notice failed", "error", err)
+	}
+}
+
+// takeLimitNotice returns the pending notice's text and removes it, or ""
+// when there is none.
+func takeLimitNotice() string {
+	data, err := os.ReadFile(limitNoticePath())
+	if err != nil {
+		return ""
+	}
+	_ = os.Remove(limitNoticePath())
+	var n limitNotice
+	if json.Unmarshal(data, &n) != nil || n.Unsaved == 0 {
+		return ""
+	}
+	what := "your last session wasn't"
+	if n.Unsaved > 1 {
+		what = fmt.Sprintf("%d sessions weren't", n.Unsaved)
+	}
+	limit := "your plan's session limit is reached"
+	if n.Limit > 0 && n.Plan != "" {
+		limit = fmt.Sprintf("the %s plan's limit of %d sessions is reached", n.Plan, n.Limit)
+	}
+	msg := fmt.Sprintf("session-vault: %s saved automatically: %s.", what, limit)
+	if n.UpgradeURL != "" {
+		msg += " Upgrade at " + n.UpgradeURL + ","
+	}
+	msg += " delete old sessions with /session-vault:clean, or turn autosave off with /session-vault:autosave off."
+	return msg
+}
+
+// printLimitNotice writes the pending notice, if any, as SessionStart hook
+// JSON: systemMessage is shown to the user (plain stdout would only reach
+// Claude's context).
+func printLimitNotice(w io.Writer) {
+	msg := takeLimitNotice()
+	if msg == "" {
+		return
+	}
+	_ = json.NewEncoder(w).Encode(map[string]string{"systemMessage": msg})
 }

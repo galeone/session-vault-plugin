@@ -20,6 +20,7 @@ background after the session ends and logs to
 `~/.local/state/session-vault/logs/`. It skips sessions without a reply
 from Claude, sessions unchanged since their last save, and sessions the
 server holds a newer save of (for example one continued on another
-machine). It also never creates an encryption key: until the user has run
+machine). If the plan's session limit stops it, the next session starts with a
+notice saying so. It also never creates an encryption key: until the user has run
 `/session-vault:save` once on this machine, or copied `age.key` here,
 nothing is saved automatically.

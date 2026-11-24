@@ -375,7 +375,9 @@ func keygen() error {
 // on stdin. State is keyed by cwd slug so concurrent sessions in different
 // projects don't clobber each other. Best-effort: never fails the hook.
 func track() error {
-	return trackFrom(os.Stdin)
+	err := trackFrom(os.Stdin)
+	printLimitNotice(os.Stdout)
+	return err
 }
 
 // trackFrom is the testable core of track: it reads the hook payload from r

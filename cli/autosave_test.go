@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -230,5 +232,52 @@ func TestAutosaveRunKeepsNewerServerCopy(t *testing.T) {
 	}
 	if v.metas["s1"].Name != "other-machine" {
 		t.Error("the newer server copy was overwritten")
+	}
+}
+
+func TestAutosaveLimitNotice(t *testing.T) {
+	v, _ := setupAutosave(t, chatTranscript)
+	v.limit = 1
+	other, _ := age.GenerateX25519Identity()
+	v.put(t, "already-there", "", "x", other.Recipient())
+	projects := filepath.Join(os.Getenv("CLAUDE_CONFIG_DIR"), "projects", "-work-repo")
+	for _, id := range []string{"s1", "s2"} {
+		if err := os.WriteFile(filepath.Join(projects, id+".jsonl"), []byte(chatTranscript), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := autosaveRun(id); err == nil {
+			t.Fatalf("%s saved past the limit", id)
+		}
+	}
+
+	var out bytes.Buffer
+	printLimitNotice(&out)
+	var hook struct {
+		SystemMessage string `json:"systemMessage"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &hook); err != nil {
+		t.Fatalf("notice is not hook JSON: %q (%v)", out.String(), err)
+	}
+	for _, want := range []string{"2 sessions weren't saved", "free plan's limit of 1", "https://vault.example/account", "/session-vault:autosave off"} {
+		if !strings.Contains(hook.SystemMessage, want) {
+			t.Errorf("notice %q lacks %q", hook.SystemMessage, want)
+		}
+	}
+
+	out.Reset()
+	printLimitNotice(&out)
+	if out.Len() != 0 {
+		t.Errorf("the notice was shown twice: %q", out.String())
+	}
+}
+
+func TestNoLimitNoticeOnOtherFailures(t *testing.T) {
+	v, _ := setupAutosave(t, chatTranscript)
+	v.failPost["s1"] = 1
+	_ = autosaveRun("s1")
+	var out bytes.Buffer
+	printLimitNotice(&out)
+	if out.Len() != 0 {
+		t.Errorf("a 500 produced a limit notice: %q", out.String())
 	}
 }
