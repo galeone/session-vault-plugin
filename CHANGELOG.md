@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.0](https://github.com/galeone/session-vault-plugin/compare/v1.6.0...v1.7.0) (2026-11-24)
+
+
+### Features
+
+* save and restore subagent transcripts with the session ([#20](https://github.com/galeone/session-vault-plugin/issues/20)) ([1d9deb8](https://github.com/galeone/session-vault-plugin/commit/1d9deb861d2728a7365840ba1abc4ddaafef1831))
+
 ## [1.6.0](https://github.com/galeone/session-vault-plugin/compare/v1.5.0...v1.6.0) (2026-11-24)
 
 
