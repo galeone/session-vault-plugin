@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.6.0](https://github.com/galeone/session-vault-plugin/compare/v1.5.0...v1.6.0) (2026-11-24)
+
+
+### Features
+
+* rotate-key command and key-loss documentation ([#19](https://github.com/galeone/session-vault-plugin/issues/19)) ([6c5b1bb](https://github.com/galeone/session-vault-plugin/commit/6c5b1bb548d946742d0d8eb4265d728bcf56e3c0))
+* warn that restored sessions can contain secrets ([#17](https://github.com/galeone/session-vault-plugin/issues/17)) ([ef77250](https://github.com/galeone/session-vault-plugin/commit/ef77250c123cd4df979839ec4e680b59d111d33c))
+
 ## [1.5.0](https://github.com/galeone/session-vault-plugin/compare/v1.4.1...v1.5.0) (2026-11-22)
 
 
