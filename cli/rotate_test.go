@@ -78,6 +78,9 @@ func newMemVault(t *testing.T) (*memVault, *httptest.Server) {
 			Name: r.Header.Get("X-Name"), Size: int64(len(body)), UploadedAt: time.Now(),
 			Encrypted: r.Header.Get("X-Encrypted"),
 		}
+		if m.Name == "" {
+			m.Name = v.metas[id].Name // like the server: an unnamed re-save keeps the label
+		}
 		v.metas[id], v.blobs[id] = m, body
 		_ = json.NewEncoder(w).Encode(m)
 	})

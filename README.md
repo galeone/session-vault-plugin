@@ -110,8 +110,8 @@ newer save of it (e.g. you continued the session on another machine and
 saved it there); the replaced local copy is kept next to it as
 `<id>.jsonl.<timestamp>.bak`. Local progress made after your last fetch or
 save is never replaced. Re-saving a labeled
-session without repeating the name keeps its label. When you save without a
-name, the CLI uses the session title Claude Code generates (the one shown in
+session without repeating the name keeps its label. When you save a session
+that has no name yet without giving one, the CLI uses the session title Claude Code generates (the one shown in
 the terminal title) — e.g. `Apple access from Teams thread` becomes
 `apple-access-from-teams-thread` — so every save gets a recognizable label
 automatically.
