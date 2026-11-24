@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.8.1](https://github.com/galeone/session-vault-plugin/compare/v1.8.0...v1.8.1) (2026-11-24)
+
+
+### Bug Fixes
+
+* keep a session's saved name on an unnamed re-save ([#24](https://github.com/galeone/session-vault-plugin/issues/24)) ([0dacc03](https://github.com/galeone/session-vault-plugin/commit/0dacc0370f4cd3a20bbf064bb1aff8402e16e737))
+
 ## [1.8.0](https://github.com/galeone/session-vault-plugin/compare/v1.7.0...v1.8.0) (2026-11-24)
 
 
