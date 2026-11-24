@@ -281,3 +281,48 @@ func TestNoLimitNoticeOnOtherFailures(t *testing.T) {
 		t.Errorf("a 500 produced a limit notice: %q", out.String())
 	}
 }
+
+const titledTranscript = `{"type":"user","cwd":"/work/repo","message":{"content":"hi"}}
+{"type":"assistant","cwd":"/work/repo","message":{"content":"hello"}}
+{"type":"ai-title","aiTitle":"LinkedIn post draft"}
+`
+
+func TestSaveKeepsSavedName(t *testing.T) {
+	v, path := setupAutosave(t, titledTranscript)
+
+	// Not on the server yet: named after the title.
+	if err := save("", "s1"); err != nil {
+		t.Fatal(err)
+	}
+	if got := v.metas["s1"].Name; got != "linkedin-post-draft" {
+		t.Fatalf("first save named %q, want the title", got)
+	}
+
+	// Renamed by the user, then the title changes: unnamed saves (manual or
+	// automatic) keep the user's name.
+	if err := save("advertising", "s1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(titledTranscript+`{"type":"ai-title","aiTitle":"Something else"}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := save("", "s1"); err != nil {
+		t.Fatal(err)
+	}
+	later := time.Now().Add(time.Minute)
+	_ = os.Chtimes(path, later, later)
+	if err := autosaveRun("s1"); err != nil {
+		t.Fatal(err)
+	}
+	if got := v.metas["s1"].Name; got != "advertising" {
+		t.Fatalf("unnamed re-save renamed the session to %q", got)
+	}
+
+	// An explicit name still replaces it.
+	if err := save("renamed", "s1"); err != nil {
+		t.Fatal(err)
+	}
+	if got := v.metas["s1"].Name; got != "renamed" {
+		t.Fatalf("explicit name gave %q", got)
+	}
+}

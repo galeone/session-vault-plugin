@@ -559,9 +559,20 @@ func save(name, sessionID string) error {
 		project = projectSlug(cwd)
 	}
 	if name == "" {
-		if title := sessionTitle(transcript); title != "" {
-			name = slugify(title)
-			fmt.Fprintf(os.Stderr, "no name given; using the session title %q\n", title)
+		// A session already saved under a name keeps it: the upload then
+		// carries no name, and the server keeps the stored one. Only a
+		// session without one is named after its title.
+		saved, err := savedName(cfg, id)
+		switch {
+		case err != nil:
+			slog.Debug("save: looking up the saved name failed; not naming the session", "session_id", id, "error", err)
+		case saved != "":
+			fmt.Fprintf(os.Stderr, "no name given; keeping the saved name %q\n", saved)
+		default:
+			if title := sessionTitle(transcript); title != "" {
+				name = slugify(title)
+				fmt.Fprintf(os.Stderr, "no name given; using the session title %q\n", title)
+			}
 		}
 	}
 
@@ -606,6 +617,23 @@ func save(name, sessionID string) error {
 	fmt.Printf("saved session %s%s (encrypted, %d bytes stored) from %s\n", meta.SessionID, label, meta.Size, transcript)
 	slog.Debug("save", "session_id", meta.SessionID, "name", meta.Name, "size", meta.Size, "encrypted", meta.Encrypted, "transcript", transcript, "subagents", len(subagents))
 	return nil
+}
+
+// savedName returns the name the server stores for session id (its newest
+// copy's), or "" when it has none or isn't stored yet.
+func savedName(cfg config, id string) (string, error) {
+	metas, err := listSessions(cfg)
+	if err != nil {
+		return "", err
+	}
+	var name string
+	var newest time.Time
+	for _, m := range metas {
+		if m.SessionID == id && (name == "" || m.UploadedAt.After(newest)) {
+			name, newest = m.Name, m.UploadedAt
+		}
+	}
+	return name, nil
 }
 
 // uploadSession encrypts and uploads one session: the transcript alone
