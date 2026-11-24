@@ -9,7 +9,7 @@
 #   3. cached download               ~/.local/share/session-vault/bin/
 set -euo pipefail
 
-VERSION="1.8.0"
+VERSION="1.8.1"
 # SHA-256 of the release binaries of $VERSION, committed here so that what
 # runs is checked against this repository, not against a file fetched from
 # the same place as the binary. The release workflow (sync-version) rewrites
@@ -17,12 +17,12 @@ VERSION="1.8.0"
 # from the tagged source (cli/build-release.sh).
 # BEGIN CHECKSUMS
 CHECKSUMS="
-7914193ac265f55982b88426bd3e3c0c76c7a0d0f7518a49958d65b54902f4cb  session-vault_darwin_amd64
-dccc425956a34ab9d43988f2820dbd441e8f925a0bbe958fe1ad2b146e5ae3ef  session-vault_darwin_arm64
-b15b5225254d0051855bda22c19811a0896681237959ec1efce71940f04f55e5  session-vault_linux_amd64
-e9585a2224ac49ed7e437484c94a49cb29ddf4efe10ecd3f477f081982c81da2  session-vault_linux_arm64
-e50ccc726ceb3d2bf3ff8400d639ea5e8ac662e576d9668d9e80703b39e97973  session-vault_windows_amd64.exe
-8de41844d9cc5933466f1d64fde8b86765755ab553fd286f29c972d193a2dc8d  session-vault_windows_arm64.exe
+1f873299e37a1f97fe60ad7e410892e6025803558536fb28280466a8060a4d05  session-vault_darwin_amd64
+1f836340cfba6de06507c4666b7af51c5986f1d71c319bba99fd50f702c641e4  session-vault_darwin_arm64
+2ad4c23327a4cae9805fa5383f9c8987e5f0cfc37136d2a908b53a095c88fd62  session-vault_linux_amd64
+d732fef8a1fd9f189f9f2544fc5419badba5df9913c2d47e17fa6f2f3461b69f  session-vault_linux_arm64
+970d393a737a4ee8a21446bc2b183f600e29963182416b583e3dffd0da870a00  session-vault_windows_amd64.exe
+da5e01a7d1aaae25759bfe8553000847c5cc9593a6c47ae8ee2c1183ec414b39  session-vault_windows_arm64.exe
 "
 # END CHECKSUMS
 RELEASE_BASE="${SESSION_VAULT_RELEASE_BASE:-https://github.com/galeone/session-vault-plugin/releases/download/v$VERSION}"
