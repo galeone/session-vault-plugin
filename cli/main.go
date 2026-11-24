@@ -675,8 +675,12 @@ func get(key string) error {
 	if err != nil {
 		return err
 	}
-	if err := download(cfg, meta, projectSlug(cwd)); err != nil {
+	written, err := download(cfg, meta, projectSlug(cwd))
+	if err != nil {
 		return err
+	}
+	if written {
+		fmt.Println(restoreWarning)
 	}
 	if meta.Cwd != "" && meta.Cwd != cwd {
 		fmt.Printf("note: this session was recorded in %s; its history references paths from there\n", meta.Cwd)
@@ -773,12 +777,18 @@ func fetchAll() error {
 	if err != nil {
 		return err
 	}
+	anyWritten := false
 	for _, m := range metas {
 		// Mirror to the original project directory: `all` is a backup
 		// restore, unlike `get` which pulls a session into the cwd.
-		if err := download(cfg, m, m.Project); err != nil {
+		written, err := download(cfg, m, m.Project)
+		if err != nil {
 			return fmt.Errorf("session %s: %w", m.SessionID, err)
 		}
+		anyWritten = anyWritten || written
+	}
+	if anyWritten {
+		fmt.Println(restoreWarning)
 	}
 	return nil
 }
@@ -854,18 +864,25 @@ func cleanAll(yes bool) error {
 	return nil
 }
 
+// restoreWarning is printed after a restore wrote at least one transcript.
+// Saving only encrypts what is already on the machine, but a restore writes
+// the plaintext, secrets included, onto a machine that may never have had it.
+const restoreWarning = "warning: sessions can contain secrets (pasted tokens, .env contents, command output); " +
+	"the restored transcript is stored in plaintext on this machine"
+
 // download fetches meta's blob and writes the decrypted transcript into the
-// given local project slug.
-func download(cfg config, meta Meta, destProject string) error {
+// given local project slug. It reports whether a transcript was written
+// (false when the local copy is up to date and was left alone).
+func download(cfg config, meta Meta, destProject string) (bool, error) {
 	// Session ids and project slugs come from the server and become file
 	// names under ~/.claude/projects: a compromised server must not be able
 	// to steer writes elsewhere ("../..") or into odd paths.
 	id := meta.SessionID
 	if !validPathName.MatchString(id) {
-		return fmt.Errorf("server returned an invalid session id %q", id)
+		return false, fmt.Errorf("server returned an invalid session id %q", id)
 	}
 	if !validPathName.MatchString(destProject) {
-		return fmt.Errorf("server returned an invalid project %q for session %s", destProject, id)
+		return false, fmt.Errorf("server returned an invalid project %q for session %s", destProject, id)
 	}
 	destDir := filepath.Join(claudeProjectsDir(), destProject)
 	dest := filepath.Join(destDir, id+".jsonl")
@@ -879,7 +896,7 @@ func download(cfg config, meta Meta, destProject string) error {
 		if meta.UploadedAt.IsZero() || !meta.UploadedAt.After(info.ModTime()) {
 			fmt.Printf("skip    %s (local copy at %s is up to date)\n", id, dest)
 			slog.Debug("download", "session_id", id, "skip", true, "dest", dest)
-			return nil
+			return false, nil
 		}
 		replace = true
 	}
@@ -891,71 +908,71 @@ func download(cfg config, meta Meta, destProject string) error {
 		// let a malicious server plant a transcript Claude Code then
 		// resumes (it cannot forge age ciphertext for our key, but it can
 		// claim "unencrypted").
-		return fmt.Errorf("session %s is not end-to-end encrypted; refusing to restore it", id)
+		return false, fmt.Errorf("session %s is not end-to-end encrypted; refusing to restore it", id)
 	default:
-		return fmt.Errorf("unknown encryption scheme %q; update the plugin", meta.Encrypted)
+		return false, fmt.Errorf("unknown encryption scheme %q; update the plugin", meta.Encrypted)
 	}
 	identities, err := cfg.identities()
 	if err != nil {
-		return err
+		return false, err
 	}
 	if identities == nil {
-		return fmt.Errorf("session is encrypted but no age key at %s (copy it from the machine that ran keygen)", cfg.AgeKey)
+		return false, fmt.Errorf("session is encrypted but no age key at %s (copy it from the machine that ran keygen)", cfg.AgeKey)
 	}
 	if err := os.MkdirAll(destDir, 0o755); err != nil {
-		return err
+		return false, err
 	}
 
 	req, err := http.NewRequest(http.MethodGet, cfg.URL+"/api/v1/sessions/"+id, nil)
 	if err != nil {
-		return err
+		return false, err
 	}
 	req.Header.Set("Authorization", "Bearer "+cfg.Token)
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return httpError(resp)
+		return false, httpError(resp)
 	}
 
 	dec, err := age.Decrypt(resp.Body, identities...)
 	if err != nil {
-		return fmt.Errorf("decrypting (wrong key?): %w", err)
+		return false, fmt.Errorf("decrypting (wrong key?): %w", err)
 	}
 	src, err := gzip.NewReader(dec)
 	if err != nil {
-		return fmt.Errorf("decompressing: %w", err)
+		return false, fmt.Errorf("decompressing: %w", err)
 	}
 
 	// Write to a temp file first so a failed download or decrypt never
 	// leaves a corrupt transcript where Claude Code would load it.
 	tmp, err := os.CreateTemp(destDir, "."+id+".*")
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer func() { _ = os.Remove(tmp.Name()) }()
 	if _, err := io.Copy(tmp, src); err != nil {
 		_ = tmp.Close()
-		return err
+		return false, err
 	}
 	if err := tmp.Close(); err != nil {
-		return err
+		return false, err
 	}
 	if replace {
 		backup := dest + "." + time.Now().UTC().Format("20060102T150405Z") + ".bak"
 		if err := os.Rename(dest, backup); err != nil {
-			return fmt.Errorf("backing up the local copy: %w", err)
+			return false, fmt.Errorf("backing up the local copy: %w", err)
 		}
 		fmt.Printf("updated %s: the server copy is newer; previous local copy kept at %s\n", id, backup)
 	}
 	if err := os.Rename(tmp.Name(), dest); err != nil {
-		return err
+		return false, err
 	}
 	fmt.Printf("fetched %s -> %s\n", id, dest)
 	slog.Debug("download", "session_id", id, "dest", dest, "encrypted", meta.Encrypted)
-	return nil
+	return true, nil
 }
 
 // ---------- http helpers ----------

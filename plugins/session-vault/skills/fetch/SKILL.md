@@ -16,10 +16,11 @@ Map the user's arguments (`$ARGUMENTS`) to a subcommand:
 - **A session id or name** — run `... get <value>`. This restores the
   session into the **current** project directory (remapping it from whatever
   machine/OS/path it was saved on) so it is immediately resumable from here.
-  Relay the script's `claude --resume <id>` hint and any note about the
-  original path verbatim.
+  Relay the script's `claude --resume <id>` hint, any note about the
+  original path, and the `warning:` line about secrets verbatim.
 - **`all`** — run `... all`, which mirrors every missing session back to its
-  original project directory (backup restore, no remapping).
+  original project directory (backup restore, no remapping). Relay its
+  `warning:` line about secrets verbatim.
 
 An existing local transcript is only replaced when the server holds a
 newer save of it; the CLI then keeps the previous copy as a `.bak` and
