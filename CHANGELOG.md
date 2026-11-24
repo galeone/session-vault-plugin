@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.8.0](https://github.com/galeone/session-vault-plugin/compare/v1.7.0...v1.8.0) (2026-11-24)
+
+
+### Features
+
+* save sessions automatically when they end ([#22](https://github.com/galeone/session-vault-plugin/issues/22)) ([27f34d9](https://github.com/galeone/session-vault-plugin/commit/27f34d98625c72ed38b4b12b18eb1a3fa9636d00))
+
 ## [1.7.0](https://github.com/galeone/session-vault-plugin/compare/v1.6.0...v1.7.0) (2026-11-24)
 
 
