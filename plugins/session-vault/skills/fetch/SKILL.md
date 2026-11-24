@@ -31,3 +31,6 @@ the session is encrypted and no key is present, tell the user to copy
 `~/.config/session-vault/age.key` from the machine where it was generated.
 If decryption fails with the wrong key, the key was probably rotated on
 another machine: tell the user to copy the new `age.key` from there.
+If it fails with "unknown encryption scheme", the session was saved by a
+newer plugin (for example with its subagent transcripts): tell the user to
+run `/plugin update` and try again.

@@ -76,7 +76,8 @@ Then:
   `~/.local/state/session-vault/by-cwd/` so that `save` knows which
   transcript is the current one. It sends nothing over the network.
 - **Sends**, only when you run a command, and only to the server in your
-  config: the transcript, gzip-compressed and encrypted with
+  config: the transcript, together with the transcripts of the subagents
+  it ran (`<session-id>/subagents/`), gzip-compressed and encrypted with
   [age](https://age-encryption.org) on your machine (the server can't read
   it); next to it, in clear, the session id, the project name, the
   directory the session was saved from and the optional name you give it,

@@ -23,6 +23,9 @@ type memVault struct {
 	metas    map[string]Meta
 	blobs    map[string][]byte
 	failPost map[string]int // session id -> uploads still to fail
+	// plainOnly makes it behave like a server older than the bundle
+	// scheme, refusing anything but age+gzip.
+	plainOnly bool
 }
 
 func newMemVault(t *testing.T) (*memVault, *httptest.Server) {
@@ -55,6 +58,10 @@ func newMemVault(t *testing.T) (*memVault, *httptest.Server) {
 		if v.failPost[id] > 0 {
 			v.failPost[id]--
 			http.Error(w, "boom", http.StatusInternalServerError)
+			return
+		}
+		if enc := r.Header.Get("X-Encrypted"); enc != schemeTranscript && (v.plainOnly || enc != schemeBundle) {
+			http.Error(w, "uploads must be end-to-end encrypted (X-Encrypted: age+gzip)", http.StatusBadRequest)
 			return
 		}
 		body, _ := io.ReadAll(r.Body)
