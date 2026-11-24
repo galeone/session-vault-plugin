@@ -132,6 +132,15 @@ automatically.
   (older Claude Code) it reads the state for the current directory
   (falling back to the most recently modified transcript for the project) and uploads it gzip-compressed and
   age-encrypted (a key is generated on the first save if none exists).
+- Subagents (Task/Agent tool calls) get their own transcripts in
+  `~/.claude/projects/<cwd-slug>/<session-id>/subagents/`. When a session
+  has any, `save` uploads them with the main transcript as one encrypted
+  bundle (`X-Encrypted: age+gzip+tar`), and a restore puts them back next to
+  the restored transcript. A session without subagents is uploaded as the
+  plain transcript (`age+gzip`), as before. Restoring a bundle needs plugin
+  1.7.0 or later (older clients refuse it and ask to update), and saving one
+  needs session-vault-server 2.1.0 or later: with an older server, `save`
+  uploads the main transcript only and says so.
 - Transcripts are treated as opaque blobs: their JSONL format is internal to
   Claude Code and changes between versions, so nothing here parses them.
 

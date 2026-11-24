@@ -176,7 +176,7 @@ func rotateSession(cfg config, m Meta, newID *age.X25519Identity, oldIDs []age.I
 	if !validPathName.MatchString(m.SessionID) || !validPathName.MatchString(m.Project) {
 		return false, fmt.Errorf("server returned an invalid session id or project")
 	}
-	if m.Encrypted != "age+gzip" {
+	if m.Encrypted != schemeTranscript && m.Encrypted != schemeBundle {
 		return false, fmt.Errorf("unexpected encryption %q", m.Encrypted)
 	}
 	blob, err := fetchBlob(cfg, m.SessionID)
@@ -194,8 +194,8 @@ func rotateSession(cfg config, m Meta, newID *age.X25519Identity, oldIDs []age.I
 		}
 		return false, fmt.Errorf("neither the old nor the new key can decrypt it")
 	}
-	// The payload is gzip(transcript): re-encrypt it as is, without
-	// decompressing, to the new key only.
+	// The payload is gzip(transcript) or gzip(tar): re-encrypt it as is,
+	// without decompressing, to the new key only, under the same scheme.
 	var out bytes.Buffer
 	enc, err := age.Encrypt(&out, newID.Recipient())
 	if err != nil {
@@ -222,7 +222,7 @@ func rotateSession(cfg config, m Meta, newID *age.X25519Identity, oldIDs []age.I
 		req.Header.Set("X-Name", m.Name)
 	}
 	req.Header.Set("Content-Type", "application/octet-stream")
-	req.Header.Set("X-Encrypted", "age+gzip")
+	req.Header.Set("X-Encrypted", m.Encrypted)
 	var stored Meta
 	if err := doJSON(req, &stored); err != nil {
 		return false, fmt.Errorf("uploading: %w", err)

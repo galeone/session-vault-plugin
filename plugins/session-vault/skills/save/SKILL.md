@@ -26,4 +26,8 @@ identifies this session even if the shell has changed directory.
 - If it reports that it generated a new age key, relay that notice verbatim:
   the key makes the upload end-to-end encrypted, and the user must copy the
   key file to every other machine that will fetch these sessions.
+- The CLI also uploads the transcripts of the subagents the session ran,
+  and says how many. If it says the server does not accept subagent
+  transcripts yet, relay that: the main transcript was saved, and updating
+  session-vault-server fixes it.
 - Report the session id that was saved and any error verbatim.

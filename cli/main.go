@@ -1,7 +1,8 @@
 // session-vault is the client CLI behind the session-vault Claude Code
 // plugin. It uploads Claude Code session transcripts to a session-vault
 // server (/session-vault:save) and downloads them back (/session-vault:fetch),
-// always end-to-end encrypted with age (a key is generated on first save).
+// together with the session's subagent transcripts, always end-to-end
+// encrypted with age (a key is generated on first save).
 //
 // It is a single static binary with no runtime dependencies, so the plugin
 // works the same on Linux, macOS, and native Windows (Git Bash).
@@ -30,6 +31,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -550,13 +552,42 @@ func save(name, sessionID string) error {
 		fmt.Fprintf(os.Stderr, "if you lose it, the sessions are unrecoverable.\n")
 	}
 
-	body, err := encodeTranscript(transcript, recipients)
+	subagents, err := subagentFiles(transcript)
+	if err != nil {
+		return fmt.Errorf("listing subagent transcripts: %w", err)
+	}
+	meta, err := uploadSession(cfg, transcript, subagents, recipients, id, project, cwd, name)
+	if err != nil && len(subagents) > 0 && schemeRefused(err) {
+		// A server older than the bundle scheme: save what it accepts.
+		fmt.Fprintln(os.Stderr, "the server does not accept subagent transcripts yet (update session-vault-server); saving the main transcript only")
+		subagents = nil
+		meta, err = uploadSession(cfg, transcript, nil, recipients, id, project, cwd, name)
+	}
 	if err != nil {
 		return err
 	}
+	label := ""
+	if meta.Name != "" {
+		label = fmt.Sprintf(" as %q", meta.Name)
+	}
+	if n := countTranscripts(subagents); n > 0 {
+		label += fmt.Sprintf(" with %d subagent transcript(s)", n)
+	}
+	fmt.Printf("saved session %s%s (encrypted, %d bytes stored) from %s\n", meta.SessionID, label, meta.Size, transcript)
+	slog.Debug("save", "session_id", meta.SessionID, "name", meta.Name, "size", meta.Size, "encrypted", meta.Encrypted, "transcript", transcript, "subagents", len(subagents))
+	return nil
+}
+
+// uploadSession encrypts and uploads one session: the transcript alone
+// when there are no subagent files, a bundle otherwise.
+func uploadSession(cfg config, transcript string, subagents []string, recipients []age.Recipient, id, project, cwd, name string) (Meta, error) {
+	body, scheme, err := encodeSession(transcript, subagents, recipients)
+	if err != nil {
+		return Meta{}, err
+	}
 	req, err := http.NewRequest(http.MethodPost, cfg.URL+"/api/v1/sessions", body)
 	if err != nil {
-		return err
+		return Meta{}, err
 	}
 	req.Header.Set("Authorization", "Bearer "+cfg.Token)
 	req.Header.Set("X-Session-Id", id)
@@ -565,22 +596,21 @@ func save(name, sessionID string) error {
 	if name != "" {
 		req.Header.Set("X-Name", name)
 	}
-	// Every upload is age(gzip(transcript)): a key is generated above when
-	// none exists, so there is no plaintext upload path.
+	// Every upload is age-encrypted: a key is generated before the first
+	// save, so there is no plaintext upload path.
 	req.Header.Set("Content-Type", "application/octet-stream")
-	req.Header.Set("X-Encrypted", "age+gzip")
-
+	req.Header.Set("X-Encrypted", scheme)
 	var meta Meta
-	if err := doJSON(req, &meta); err != nil {
-		return err
-	}
-	label := ""
-	if meta.Name != "" {
-		label = fmt.Sprintf(" as %q", meta.Name)
-	}
-	fmt.Printf("saved session %s%s (encrypted, %d bytes stored) from %s\n", meta.SessionID, label, meta.Size, transcript)
-	slog.Debug("save", "session_id", meta.SessionID, "name", meta.Name, "size", meta.Size, "encrypted", meta.Encrypted, "transcript", transcript)
-	return nil
+	err = doJSON(req, &meta)
+	return meta, err
+}
+
+// schemeRefused reports whether err is a server refusing the X-Encrypted
+// scheme: a server that predates the bundle scheme answers 400 naming the
+// header.
+func schemeRefused(err error) bool {
+	var se *statusError
+	return errors.As(err, &se) && se.code == http.StatusBadRequest && strings.Contains(se.body, "X-Encrypted")
 }
 
 // encodeTranscript streams age(gzip(transcript)), encrypting to every
@@ -923,7 +953,7 @@ func download(cfg config, meta Meta, destProject string) (bool, error) {
 		replace = true
 	}
 	switch meta.Encrypted {
-	case "age+gzip":
+	case schemeTranscript, schemeBundle:
 	case "":
 		// Every client save is age-encrypted, so a session the server
 		// reports as plaintext was not produced by us: accepting it would
@@ -968,29 +998,42 @@ func download(cfg config, meta Meta, destProject string) (bool, error) {
 		return false, fmt.Errorf("decompressing: %w", err)
 	}
 
-	// Write to a temp file first so a failed download or decrypt never
+	// Write to temp files first so a failed download or decrypt never
 	// leaves a corrupt transcript where Claude Code would load it.
-	tmp, err := os.CreateTemp(destDir, "."+id+".*")
+	var transcript restoredFile
+	var subagents []restoredFile
+	if meta.Encrypted == schemeBundle {
+		transcript, subagents, err = unpackBundle(src, destDir, id)
+	} else {
+		var tmp string
+		tmp, err = writeTemp(destDir, "."+id+".*", src)
+		transcript = restoredFile{tmp: tmp, dest: dest}
+	}
 	if err != nil {
 		return false, err
 	}
-	defer func() { _ = os.Remove(tmp.Name()) }()
-	if _, err := io.Copy(tmp, src); err != nil {
-		_ = tmp.Close()
-		return false, err
-	}
-	if err := tmp.Close(); err != nil {
-		return false, err
-	}
+	defer func() {
+		// Whatever was not renamed into place.
+		_ = os.Remove(transcript.tmp)
+		for _, f := range subagents {
+			_ = os.Remove(f.tmp)
+		}
+	}()
+	transcriptChanged := true
 	if replace {
 		// A re-upload with the same content (rotate-key re-encrypts every
 		// session, which bumps uploaded_at) must not churn .bak copies:
-		// keep the local file, and mark it current so the next fetch skips.
-		same, err := sameContent(tmp.Name(), dest)
+		// keep the local files, and mark the transcript current so the
+		// next fetch skips.
+		same, err := sameContent(transcript.tmp, dest)
 		if err != nil {
 			return false, err
 		}
-		if same {
+		subsSame, err := subagentsCurrent(subagents)
+		if err != nil {
+			return false, err
+		}
+		if same && subsSame {
 			now := time.Now()
 			if err := os.Chtimes(dest, now, now); err != nil {
 				return false, err
@@ -999,14 +1042,32 @@ func download(cfg config, meta Meta, destProject string) (bool, error) {
 			slog.Debug("download", "session_id", id, "skip", true, "same_content", true, "dest", dest)
 			return false, nil
 		}
-		backup := dest + "." + time.Now().UTC().Format("20060102T150405Z") + ".bak"
-		if err := os.Rename(dest, backup); err != nil {
-			return false, fmt.Errorf("backing up the local copy: %w", err)
+		transcriptChanged = !same
+		if transcriptChanged {
+			backup := dest + "." + time.Now().UTC().Format("20060102T150405Z") + ".bak"
+			if err := os.Rename(dest, backup); err != nil {
+				return false, fmt.Errorf("backing up the local copy: %w", err)
+			}
+			fmt.Printf("updated %s: the server copy is newer; previous local copy kept at %s\n", id, backup)
 		}
-		fmt.Printf("updated %s: the server copy is newer; previous local copy kept at %s\n", id, backup)
 	}
-	if err := os.Rename(tmp.Name(), dest); err != nil {
+	nSub, err := placeSubagents(subagents)
+	if err != nil {
 		return false, err
+	}
+	if transcriptChanged {
+		if err := os.Rename(transcript.tmp, dest); err != nil {
+			return false, err
+		}
+	} else {
+		// Only subagent files changed: the transcript stays, marked current.
+		now := time.Now()
+		if err := os.Chtimes(dest, now, now); err != nil {
+			return false, err
+		}
+	}
+	if nSub > 0 {
+		fmt.Printf("fetched %d subagent file(s) -> %s\n", nSub, filepath.Join(destDir, id, "subagents"))
 	}
 	fmt.Printf("fetched %s -> %s\n", id, dest)
 	slog.Debug("download", "session_id", id, "dest", dest, "encrypted", meta.Encrypted)
@@ -1027,7 +1088,18 @@ func doJSON(req *http.Request, out any) error {
 	return json.NewDecoder(resp.Body).Decode(out)
 }
 
+// statusError is a non-2xx answer from the server.
+type statusError struct {
+	code   int
+	status string
+	body   string
+}
+
+func (e *statusError) Error() string {
+	return fmt.Sprintf("server returned %s: %s", e.status, e.body)
+}
+
 func httpError(resp *http.Response) error {
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-	return fmt.Errorf("server returned %s: %s", resp.Status, strings.TrimSpace(string(body)))
+	return &statusError{code: resp.StatusCode, status: resp.Status, body: strings.TrimSpace(string(body))}
 }
