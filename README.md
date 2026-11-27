@@ -1,5 +1,7 @@
 # session-vault (Claude Code plugin)
 
+[![HOL Guard](https://img.shields.io/endpoint?url=https%3A%2F%2Fhol.org%2Fapi%2Fregistry%2Fbadges%2Fplugin%3Fslug%3Dgaleone%252Fsession-vault%26metric%3Drelease)](https://hol.org/registry/plugins/galeone%2Fsession-vault?utm_source=hol_marketplace&utm_medium=plugins_badge&utm_campaign=plugins&utm_content=galeone%2Fsession-vault&ref=plugin-author-e58fc51a)
+
 Save your Claude Code sessions to your own server with `/session-vault:save`, and get them
 back on any machine with `/session-vault:fetch`. End-to-end encrypted with
 [age](https://age-encryption.org): the server only ever stores ciphertext.
